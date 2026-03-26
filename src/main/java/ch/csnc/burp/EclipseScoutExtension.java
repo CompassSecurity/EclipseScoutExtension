@@ -29,6 +29,9 @@ public class EclipseScoutExtension implements BurpExtension {
 
     var tab = new EclipseScoutTab();
     api.userInterface().registerSuiteTab(NAME, tab.getComponent());
+
+    var contextMenu = new EclipseScoutContextMenu(tab::addRequestResponse);
+    api.userInterface().registerContextMenuItemsProvider(contextMenu);
   }
 
 }
