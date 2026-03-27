@@ -17,13 +17,25 @@ public class EclipseScoutTableModel extends AbstractTableModel {
 
   public EclipseScoutTableModel() {
     this.tableRowSorter.setComparator(0, (s1, s2) -> {
+      // Handle nulls first
+      if (s1 == null && s2 == null) return 0;
+      if (s1 == null) return 1;   // nulls last
+      if (s2 == null) return -1;
+
+      // Parse integers, handle invalid strings
+      int n1, n2;
       try {
-        Integer i1 = Integer.parseInt((String) s1);
-        Integer i2 = Integer.parseInt((String) s2);
-        return i1.compareTo(i2);
+          n1 = Integer.parseInt(s1.toString());
       } catch (NumberFormatException e) {
-          return -1;
+          n1 = Integer.MAX_VALUE; // invalid strings last
       }
+      try {
+          n2 = Integer.parseInt(s2.toString());
+      } catch (NumberFormatException e) {
+          n2 = Integer.MAX_VALUE;
+      }
+
+      return Integer.compare(n1, n2);
     });
   }
 
