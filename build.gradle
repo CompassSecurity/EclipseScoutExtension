@@ -14,8 +14,10 @@ compileJava {
 }
 
 dependencies {
-	compileOnly libs.net.portswigger.burp.extensions.montoya.api
-	testImplementation libs.org.junit.jupiter
+	compileOnly "net.portswigger.burp.extensions:montoya-api:2026.2"
+	implementation "org.json:json:20251224"
+	implementation "com.miglayout:miglayout:3.7.4"
+	testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
 }
 
 compileJava {
