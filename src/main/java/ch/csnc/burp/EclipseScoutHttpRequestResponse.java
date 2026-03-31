@@ -16,9 +16,15 @@ public class EclipseScoutHttpRequestResponse {
   private Integer sequenceNr;
   private String uiSessionId;
 
+  public EclipseScoutHttpRequestResponse(HttpRequest request) {
+    this(HttpRequestResponse.httpRequestResponse(request, null));
+  }
+
   public EclipseScoutHttpRequestResponse(HttpRequestResponse requestResponse) {
     this.request = HttpRequest.httpRequest(requestResponse.request().httpService(), requestResponse.request().toByteArray());
-    this.response = HttpResponse.httpResponse(requestResponse.response().toByteArray());
+    if (requestResponse.response() != null) {
+      this.response = HttpResponse.httpResponse(requestResponse.response().toByteArray());
+    }
 
     if (this.request.contentType() == ContentType.JSON) {
       try {
@@ -71,6 +77,11 @@ public class EclipseScoutHttpRequestResponse {
     }
   }
 
+  public EclipseScoutHttpRequestResponse withUiSessionId(String uiSessionId) {
+    this.setUiSessionId(uiSessionId);
+    return this;
+  }
+
   public String getUiSessionId() {
     return this.uiSessionId;
   }
@@ -80,6 +91,11 @@ public class EclipseScoutHttpRequestResponse {
       HttpRequestResponse.httpRequestResponse(
         HttpRequest.httpRequest(this.request().httpService(), this.request().toByteArray()),
         HttpResponse.httpResponse(this.response().toByteArray())));
+  }
+
+  public void send() {
+    var response = EclipseScoutExtension.api.http().sendRequest(this.request).response();
+    this.setResponse(response);
   }
   
 }

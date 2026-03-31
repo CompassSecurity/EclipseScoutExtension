@@ -11,21 +11,20 @@ import java.awt.event.KeyEvent;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
-
-import org.json.JSONObject;
 
 import burp.api.montoya.http.handler.HttpHandler;
 import burp.api.montoya.http.handler.HttpRequestToBeSent;
@@ -42,6 +41,8 @@ import net.miginfocom.swing.MigLayout;
 
 public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
 
+  private static final String ECLIPSE_SCOUT_HEADER = "X-Eclipse-Scout";
+
   private JButton sendSequence;
   private EclipseScoutTableModel tableModel;
   private JTable table;
@@ -50,6 +51,8 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
   private JPanel panel;
 
   private int selectedRow = -1;
+
+  private Map<Integer, EclipseScoutSequence> sequences = new HashMap<>();
 
   public EclipseScoutTab() {
     var statusLabel = new JLabel();
@@ -176,12 +179,26 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     this.tableModel.addRequestResponse(requestResponse);
   }
 
+  private List<EclipseScoutHttpRequestResponse> getRequestResponesAsDisplayed() {
+    var requestResponses = new ArrayList<EclipseScoutHttpRequestResponse>();
+    for (int i = 0; i < this.table.getRowCount(); i++) {
+      var modelIndex = this.table.convertRowIndexToModel(i);
+      requestResponses.add(this.tableModel.getRequestResponseAt(modelIndex));
+    }
+    return requestResponses;
+  }
+
   public void sendSequence() {
-    var requestResponses = this.tableModel.getRequestResponses();
+    var viewIndex = 0;
+    var requestResponses = this.getRequestResponesAsDisplayed();
     var sequence = new EclipseScoutSequence(requestResponses);
-    sequence.send();
-    var updatedRequestResponses = sequence.getHttpRequestResponses();
-    this.tableModel.setRequestResponses(updatedRequestResponses);
+    while (sequence.hasNext()) {
+      var requestResponse = sequence.next();
+      requestResponse.send();
+      var modelIndex = this.table.convertRowIndexToModel(viewIndex);
+      this.tableModel.setRequestResponseAt(modelIndex, requestResponse);
+      viewIndex++;
+    }
   }
   
   @Override
@@ -195,11 +212,36 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
 
   @Override
   public RequestToBeSentAction handleHttpRequestToBeSent(HttpRequestToBeSent requestToBeSent) {
+    try {
+      if (requestToBeSent.hasHeader(ECLIPSE_SCOUT_HEADER)) {
+        var sequenceNr = new EclipseScoutHttpRequestResponse(requestToBeSent).sequenceNr();
+        var sequence = new EclipseScoutSequence(this.getRequestResponesAsDisplayed());
+        this.sequences.put(requestToBeSent.messageId(), sequence);
+        while (sequence.hasNext()) {
+          var requestResponse = sequence.next();
+          if (requestResponse.sequenceNr() == sequenceNr) {
+            var request = requestToBeSent.withRemovedHeader(ECLIPSE_SCOUT_HEADER);
+            request = new EclipseScoutHttpRequestResponse(request).withUiSessionId(requestResponse.getUiSessionId()).request();
+            return RequestToBeSentAction.continueWith(request);
+          } else {
+            requestResponse.send();
+          }
+        }
+      } 
+    } catch (Exception exc) {
+      EclipseScoutExtension.api.logging().logToError(exc);
+    }
     return RequestToBeSentAction.continueWith(requestToBeSent);
   }
 
   @Override
   public ResponseReceivedAction handleHttpResponseReceived(HttpResponseReceived responseReceived) {
+    var sequence = this.sequences.remove(responseReceived.messageId());
+    if (sequence != null) {
+      while(sequence.hasNext()) {
+        sequence.next().send();
+      }
+    }
     return ResponseReceivedAction.continueWith(responseReceived);
   }
 }

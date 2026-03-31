@@ -2,12 +2,9 @@ package ch.csnc.burp;
 
 import java.util.List;
 
-import burp.api.montoya.http.handler.HttpRequestToBeSent;
-import burp.api.montoya.http.handler.HttpResponseReceived;
-import burp.api.montoya.http.handler.RequestToBeSentAction;
-import burp.api.montoya.http.handler.ResponseReceivedAction;
-
 public class EclipseScoutSequence {
+
+  private int position = 0;
 
   private List<EclipseScoutHttpRequestResponse> requestResponses;
 
@@ -15,29 +12,20 @@ public class EclipseScoutSequence {
     this.requestResponses = requestResponses.stream().map(EclipseScoutHttpRequestResponse::clone).toList();
   }
 
-  public List<EclipseScoutHttpRequestResponse> getHttpRequestResponses() {
-    return this.requestResponses;
+  public boolean hasNext() {
+    return this.position < this.requestResponses.size();
   }
 
-  public RequestToBeSentAction continueWith(HttpRequestToBeSent requestToBeSent) {
-    throw new UnsupportedOperationException();
-  }
-
-  public ResponseReceivedAction continueWith(HttpResponseReceived responseReceived) {
-    throw new UnsupportedOperationException();
-  }
-
-  public void send() {
-    for (var i = 0; i < this.requestResponses.size(); i++) {
+  public EclipseScoutHttpRequestResponse next() {
+    try {
       String uiSessionId = null;
-      if (i > 0) {
-        uiSessionId = this.requestResponses.get(i-1).getUiSessionId();
+      if (this.position > 0) {
+        uiSessionId = this.requestResponses.get(this.position-1).getUiSessionId();
       }
-      var requestResponse = this.requestResponses.get(i);
-      requestResponse.setUiSessionId(uiSessionId);
-      var response = EclipseScoutExtension.api.http().sendRequest(requestResponse.request()).response();
-      requestResponse.setResponse(response);
+      return this.requestResponses.get(position).withUiSessionId(uiSessionId);
+    } finally {
+      position++;
     }
   }
-  
+ 
 }
