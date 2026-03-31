@@ -1,7 +1,5 @@
 package ch.csnc.burp;
 
-import java.util.Optional;
-
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -12,16 +10,19 @@ import burp.api.montoya.http.message.responses.HttpResponse;
 
 public class EclipseScoutHttpRequestResponse {
 
-  private HttpRequestResponse requestResponse;
+  private HttpRequest request;
+  private HttpResponse response;
+
   private Integer sequenceNr;
+  private String uiSessionId;
 
   public EclipseScoutHttpRequestResponse(HttpRequestResponse requestResponse) {
-    this.requestResponse = requestResponse;
+    this.request = HttpRequest.httpRequest(requestResponse.request().httpService(), requestResponse.request().toByteArray());
+    this.response = HttpResponse.httpResponse(requestResponse.response().toByteArray());
 
-    var request = requestResponse.request();
-    if (request.contentType() == ContentType.JSON) {
+    if (this.request.contentType() == ContentType.JSON) {
       try {
-        var body = request.bodyToString().strip();
+        var body = this.request.bodyToString().strip();
         if (body.startsWith("{")) {
           var jsonObj = new JSONObject(body);
           this.sequenceNr = jsonObj.has("#") ? jsonObj.getInt("#") : null;
@@ -33,26 +34,52 @@ public class EclipseScoutHttpRequestResponse {
   }
 
   public HttpRequest request() {
-    return this.requestResponse.request();
+    return this.request;
   }
 
   public HttpResponse response() {
-    return this.requestResponse.response();
+    return this.response;
+  }
+
+  public void setResponse(HttpResponse response) {
+    this.response = response;
+    try {
+      var jsonObj = new JSONObject(response.bodyToString());
+      var startupData = jsonObj.getJSONObject("startupData");
+      this.uiSessionId = startupData.getString("uiSessionId");
+    } catch (JSONException exc) {
+      // ignore
+    }
   }
 
   public HttpRequestResponse requestResponse() {
-    return this.requestResponse;
+    return HttpRequestResponse.httpRequestResponse(this.request, this.response);
   }
 
-  public Optional<Integer> sequenceNr() {
-    return Optional.ofNullable(this.sequenceNr);
+  public Integer sequenceNr() {
+    return this.sequenceNr;
   }
 
   public void setUiSessionId(String uiSessionId) {
-    var jsonObj = new JSONObject(this.requestResponse.request().bodyToString());
-    jsonObj.put("uiSessionId", uiSessionId);
-    var updatedRequest = this.requestResponse.request().withBody(jsonObj.toString());
-    this.requestResponse = HttpRequestResponse.httpRequestResponse(updatedRequest, this.requestResponse.response());
+    this.uiSessionId = uiSessionId;
+    try {
+      var jsonObj = new JSONObject(this.request.bodyToString());
+      jsonObj.put("uiSessionId", uiSessionId);
+      this.request = this.request.withBody(jsonObj.toString());
+    } catch (JSONException exc) {
+      // ignore
+    }
+  }
+
+  public String getUiSessionId() {
+    return this.uiSessionId;
+  }
+
+  public EclipseScoutHttpRequestResponse clone() {
+    return new EclipseScoutHttpRequestResponse(
+      HttpRequestResponse.httpRequestResponse(
+        HttpRequest.httpRequest(this.request().httpService(), this.request().toByteArray()),
+        HttpResponse.httpResponse(this.response().toByteArray())));
   }
   
 }

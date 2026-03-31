@@ -1,7 +1,6 @@
 package ch.csnc.burp;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 import javax.swing.table.AbstractTableModel;
@@ -12,7 +11,7 @@ import burp.api.montoya.http.message.HttpRequestResponse;
 public class EclipseScoutTableModel extends AbstractTableModel {
 
   private String[] columnNames = new String[]{"#", "Method", "Host", "Path"};
-  private List<EclipseScoutHttpRequestResponse> requestResponses = Collections.synchronizedList(new ArrayList<>());
+  private List<EclipseScoutHttpRequestResponse> requestResponses = new ArrayList<>();
   private TableRowSorter<EclipseScoutTableModel> tableRowSorter = new TableRowSorter<>(this);
 
   public EclipseScoutTableModel() {
@@ -60,7 +59,7 @@ public class EclipseScoutTableModel extends AbstractTableModel {
 	  var request = requestResponse.request();
 	  switch (columnIndex) {
 	    case 0:
-	      return requestResponse.sequenceNr().map(String::valueOf).orElse("");
+	      return requestResponse.sequenceNr() != null ? requestResponse.sequenceNr() : "";
 	    case 1:
 	      return request.method();
 	    case 2:
@@ -85,7 +84,7 @@ public class EclipseScoutTableModel extends AbstractTableModel {
 	}
 
 	public void setRequestResponseAt(int row, EclipseScoutHttpRequestResponse requestResponse) {
-	  requestResponses.set(row, requestResponse);
+	  this.requestResponses.set(row, requestResponse);
 	  this.fireTableRowsUpdated(row, row);
 	}
 
@@ -94,12 +93,17 @@ public class EclipseScoutTableModel extends AbstractTableModel {
 	}
 
 	public void addRequestResponse(EclipseScoutHttpRequestResponse requestResponse) {
-	  requestResponses.add(requestResponse);
+	  this.requestResponses.add(requestResponse);
 	  this.fireTableDataChanged();
 	}
 
 	public void removeRequestResponse(EclipseScoutHttpRequestResponse requestResponse) {
 	  this.requestResponses.remove(requestResponse);
+	  this.fireTableDataChanged();
+	}
+
+	public void setRequestResponses(List<EclipseScoutHttpRequestResponse> requestResponses) {
+	  this.requestResponses = new ArrayList<>(requestResponses.stream().map(EclipseScoutHttpRequestResponse::clone).toList());
 	  this.fireTableDataChanged();
 	}
 
