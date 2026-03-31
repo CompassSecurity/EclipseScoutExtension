@@ -87,10 +87,12 @@ public class EclipseScoutHttpRequestResponse {
   }
 
   public EclipseScoutHttpRequestResponse clone() {
-    return new EclipseScoutHttpRequestResponse(
-      HttpRequestResponse.httpRequestResponse(
-        HttpRequest.httpRequest(this.request().httpService(), this.request().toByteArray()),
-        HttpResponse.httpResponse(this.response().toByteArray())));
+    HttpRequest clonedRequest = HttpRequest.httpRequest(this.request.httpService(), this.request.toByteArray());
+    HttpResponse clonedResponse = null;
+    if (this.response != null) {
+      clonedResponse = HttpResponse.httpResponse(this.response.toByteArray());
+    }
+    return new EclipseScoutHttpRequestResponse( HttpRequestResponse.httpRequestResponse(clonedRequest, clonedResponse));
   }
 
   public void send() {
