@@ -189,15 +189,10 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
   }
 
   public void sendSequence() {
-    var viewIndex = 0;
     var requestResponses = this.getRequestResponesAsDisplayed();
     var sequence = new EclipseScoutSequence(requestResponses);
     while (sequence.hasNext()) {
-      var requestResponse = sequence.next();
-      requestResponse.send();
-      var modelIndex = this.table.convertRowIndexToModel(viewIndex);
-      this.tableModel.setRequestResponseAt(modelIndex, requestResponse);
-      viewIndex++;
+      sequence.next().send();
     }
   }
   
