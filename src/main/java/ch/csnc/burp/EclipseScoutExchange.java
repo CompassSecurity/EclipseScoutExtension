@@ -8,33 +8,47 @@ import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
 
-public class EclipseScoutHttpRequestResponse {
+public class EclipseScoutExchange {
 
   private HttpRequest request;
   private HttpResponse response;
 
-  private Integer sequenceNr;
+  private Integer sequenceNrRequest;
+  private Integer sequenceNrResponse;
   private String uiSessionId;
 
-  public EclipseScoutHttpRequestResponse(HttpRequest request) {
+  public EclipseScoutExchange(HttpRequest request) {
     this(HttpRequestResponse.httpRequestResponse(request, null));
   }
 
-  public EclipseScoutHttpRequestResponse(HttpRequestResponse requestResponse) {
-    this.request = HttpRequest.httpRequest(requestResponse.request().httpService(), requestResponse.request().toByteArray());
+  public EclipseScoutExchange(HttpRequestResponse requestResponse) {
+    this.request = HttpRequest.httpRequest(requestResponse.request().httpService(),
+        requestResponse.request().toByteArray());
     if (requestResponse.response() != null) {
       this.response = HttpResponse.httpResponse(requestResponse.response().toByteArray());
     }
 
     if (this.request.contentType() == ContentType.JSON) {
       try {
-        var body = this.request.bodyToString().strip();
-        if (body.startsWith("{")) {
-          var jsonObj = new JSONObject(body);
-          this.sequenceNr = jsonObj.has("#") ? jsonObj.getInt("#") : null;
+        {
+          var body = this.request.bodyToString().strip();
+          if (body.startsWith("{")) {
+            var jsonObj = new JSONObject(body);
+            this.sequenceNrRequest = jsonObj.has("#") ? jsonObj.getInt("#") : null;
+          }
+        }
+        {
+          if (this.response != null) {
+            var body = this.response.bodyToString().strip();
+            if (body.startsWith("{")) {
+              var jsonObj = new JSONObject(body);
+              this.sequenceNrResponse = jsonObj.has("#") ? jsonObj.getInt("#") : null;
+            }
+          }
         }
       } catch (JSONException exc) {
-        this.sequenceNr = null;
+        this.sequenceNrRequest = null;
+        this.sequenceNrResponse = null;
       }
     }
   }
@@ -62,8 +76,12 @@ public class EclipseScoutHttpRequestResponse {
     return HttpRequestResponse.httpRequestResponse(this.request, this.response);
   }
 
-  public Integer sequenceNr() {
-    return this.sequenceNr;
+  public Integer sequenceNrRequest() {
+    return this.sequenceNrRequest;
+  }
+
+  public Integer sequenceNrResponse() {
+    return this.sequenceNrResponse;
   }
 
   public void setUiSessionId(String uiSessionId) {
@@ -77,8 +95,23 @@ public class EclipseScoutHttpRequestResponse {
     }
   }
 
-  public EclipseScoutHttpRequestResponse withUiSessionId(String uiSessionId) {
+  public void setSequenceNrRequest(int n) {
+    try {
+      var jsonObj = new JSONObject(this.request.bodyToString());
+      jsonObj.put("#", n);
+      this.request = this.request.withBody(jsonObj.toString());
+    } catch (JSONException exc) {
+      // ignore
+    }
+  }
+
+  public EclipseScoutExchange withUiSessionId(String uiSessionId) {
     this.setUiSessionId(uiSessionId);
+    return this;
+  }
+
+  public EclipseScoutExchange withSequenceNrRequest(int n) {
+    this.setSequenceNrRequest(n);
     return this;
   }
 
@@ -86,18 +119,18 @@ public class EclipseScoutHttpRequestResponse {
     return this.uiSessionId;
   }
 
-  public EclipseScoutHttpRequestResponse clone() {
+  public EclipseScoutExchange clone() {
     HttpRequest clonedRequest = HttpRequest.httpRequest(this.request.httpService(), this.request.toByteArray());
     HttpResponse clonedResponse = null;
     if (this.response != null) {
       clonedResponse = HttpResponse.httpResponse(this.response.toByteArray());
     }
-    return new EclipseScoutHttpRequestResponse( HttpRequestResponse.httpRequestResponse(clonedRequest, clonedResponse));
+    return new EclipseScoutExchange(HttpRequestResponse.httpRequestResponse(clonedRequest, clonedResponse));
   }
 
   public void send() {
     var response = EclipseScoutExtension.api.http().sendRequest(this.request).response();
     this.setResponse(response);
   }
-  
+
 }

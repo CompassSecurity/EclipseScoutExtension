@@ -96,7 +96,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
 
     var tableDeleteSelectedItems = new JMenuItem("Delete selected items");
     tableDeleteSelectedItems.addActionListener(event -> {
-      var requestResponsesToDelete = new ArrayList<EclipseScoutHttpRequestResponse>();
+      var requestResponsesToDelete = new ArrayList<EclipseScoutExchange>();
       for (int viewIndex : this.table.getSelectedRows()) {
         var modelIndex = this.table.convertRowIndexToModel(viewIndex);
         requestResponsesToDelete.add(this.tableModel.getRequestResponseAt(modelIndex));
@@ -179,8 +179,8 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     this.tableModel.addRequestResponse(requestResponse);
   }
 
-  private List<EclipseScoutHttpRequestResponse> getRequestResponesAsDisplayed() {
-    var requestResponses = new ArrayList<EclipseScoutHttpRequestResponse>();
+  private List<EclipseScoutExchange> getRequestResponesAsDisplayed() {
+    var requestResponses = new ArrayList<EclipseScoutExchange>();
     for (int i = 0; i < this.table.getRowCount(); i++) {
       var modelIndex = this.table.convertRowIndexToModel(i);
       requestResponses.add(this.tableModel.getRequestResponseAt(modelIndex));
@@ -209,14 +209,14 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
   public RequestToBeSentAction handleHttpRequestToBeSent(HttpRequestToBeSent requestToBeSent) {
     try {
       if (requestToBeSent.hasHeader(ECLIPSE_SCOUT_HEADER)) {
-        var sequenceNr = new EclipseScoutHttpRequestResponse(requestToBeSent).sequenceNr();
+        var sequenceNr = new EclipseScoutExchange(requestToBeSent).sequenceNrRequest();
         var sequence = new EclipseScoutSequence(this.getRequestResponesAsDisplayed());
         this.sequences.put(requestToBeSent.messageId(), sequence);
         while (sequence.hasNext()) {
           var requestResponse = sequence.next();
-          if (requestResponse.sequenceNr() == sequenceNr) {
+          if (requestResponse.sequenceNrRequest() == sequenceNr) {
             var request = requestToBeSent.withRemovedHeader(ECLIPSE_SCOUT_HEADER);
-            request = new EclipseScoutHttpRequestResponse(request).withUiSessionId(requestResponse.getUiSessionId()).request();
+            request = new EclipseScoutExchange(request).withUiSessionId(requestResponse.getUiSessionId()).request();
             return RequestToBeSentAction.continueWith(request);
           } else {
             requestResponse.send();
