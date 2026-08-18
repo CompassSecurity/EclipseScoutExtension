@@ -44,7 +44,8 @@ import net.miginfocom.swing.MigLayout;
 
 public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
 
-  private static final String ECLIPSE_SCOUT_HEADER = "X-Eclipse-Scout";
+  private static final String REQUEST_HEADER = "X-Scout-Request";
+  private static final String RESPONSE_HEADER = "X-Scout-Response";
 
   private JButton sendSequence;
   private EclipseScoutTableModel tableModel;
@@ -55,7 +56,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
 
   private int selectedRow = -1;
 
-  private record PendingSequence(EclipseScoutSequence sequence, EclipseScoutExchange targetExchange) {
+  private record PendingSequence(EclipseScoutSequence sequence, EclipseScoutExchange targetExchange, Integer showNr) {
   }
 
   private Map<Integer, PendingSequence> sequences = new HashMap<>();
@@ -115,7 +116,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       for (int viewIndex : this.table.getSelectedRows()) {
         var modelIndex = this.table.convertRowIndexToModel(viewIndex);
         var exchange = this.tableModel.getExchangeAt(modelIndex);
-        var request = exchange.request().withHeader(ECLIPSE_SCOUT_HEADER, String.valueOf(exchange.nr()));
+        var request = exchange.request().withHeader(REQUEST_HEADER, String.valueOf(exchange.nr()));
         EclipseScoutExtension.api.repeater().sendToRepeater(request);
       }
     });
@@ -125,7 +126,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       for (int viewIndex : this.table.getSelectedRows()) {
         var modelIndex = this.table.convertRowIndexToModel(viewIndex);
         var exchange = this.tableModel.getExchangeAt(modelIndex);
-        var request = exchange.request().withHeader(ECLIPSE_SCOUT_HEADER, String.valueOf(exchange.nr()));
+        var request = exchange.request().withHeader(REQUEST_HEADER, String.valueOf(exchange.nr()));
         EclipseScoutExtension.api.intruder().sendToIntruder(request);
       }
     });
@@ -257,17 +258,21 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
   @Override
   public RequestToBeSentAction handleHttpRequestToBeSent(HttpRequestToBeSent requestToBeSent) {
     try {
-      if (requestToBeSent.hasHeader(ECLIPSE_SCOUT_HEADER)) {
-        var nr = Integer.parseInt(requestToBeSent.headerValue(ECLIPSE_SCOUT_HEADER));
+      if (requestToBeSent.hasHeader(REQUEST_HEADER)) {
+        var nr = Integer.parseInt(requestToBeSent.headerValue(REQUEST_HEADER));
+        Integer showNr = requestToBeSent.hasHeader(RESPONSE_HEADER)
+            ? Integer.parseInt(requestToBeSent.headerValue(RESPONSE_HEADER))
+            : null;
+        var request = requestToBeSent.withRemovedHeader(REQUEST_HEADER).withRemovedHeader(RESPONSE_HEADER);
+
         var sequence = new EclipseScoutSequence(this.getRequestResponesAsDisplayed());
         var targetIndex = sequence.indexOfNr(nr);
         if (targetIndex < 0) {
           EclipseScoutExtension.api.logging().logToError("No row with # %d found, sending as-is".formatted(nr));
-          return RequestToBeSentAction.continueWith(requestToBeSent.withRemovedHeader(ECLIPSE_SCOUT_HEADER));
+          return RequestToBeSentAction.continueWith(request);
         }
         var targetExchange = sequence.advanceTo(targetIndex);
-        this.sequences.put(requestToBeSent.messageId(), new PendingSequence(sequence, targetExchange));
-        var request = requestToBeSent.withRemovedHeader(ECLIPSE_SCOUT_HEADER);
+        this.sequences.put(requestToBeSent.messageId(), new PendingSequence(sequence, targetExchange, showNr));
         request = new EclipseScoutExchange(request).withUiSessionId(targetExchange.getUiSessionId()).request();
         return RequestToBeSentAction.continueWith(request);
       }
@@ -282,13 +287,15 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     var pending = this.sequences.remove(responseReceived.messageId());
     if (pending != null) {
       pending.targetExchange().setResponse(responseReceived);
-      EclipseScoutExchange lastSent = null;
       while (pending.sequence().hasNext()) {
-        lastSent = pending.sequence().next();
-        lastSent.send();
+        pending.sequence().next().send();
       }
-      if (lastSent != null) {
-        return ResponseReceivedAction.continueWith(lastSent.response());
+      if (pending.showNr() != null) {
+        var toShow = pending.sequence().exchangeWithNr(pending.showNr());
+        if (toShow != null && toShow.response() != null) {
+          return ResponseReceivedAction.continueWith(toShow.response());
+        }
+        EclipseScoutExtension.api.logging().logToError("No response for row # %d found".formatted(pending.showNr()));
       }
     }
     return ResponseReceivedAction.continueWith(responseReceived);

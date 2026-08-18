@@ -57,4 +57,14 @@ public class EclipseScoutSequence {
     return this.next();
   }
 
+  /**
+   * Returns the exchange with the given static {@code nr}, or {@code null} if no such
+   * exchange exists. Its response reflects this replay run once the exchange has been
+   * sent (via {@link #next()}/{@link #advanceTo(int)} or externally).
+   */
+  public EclipseScoutExchange exchangeWithNr(int nr) {
+    var index = indexOfNr(nr);
+    return index >= 0 ? this.exchanges.get(index) : null;
+  }
+
 }
