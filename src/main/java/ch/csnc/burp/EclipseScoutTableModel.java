@@ -5,39 +5,20 @@ import java.util.Comparator;
 import java.util.List;
 
 import javax.swing.table.AbstractTableModel;
-import javax.swing.table.TableRowSorter;
 
 import burp.api.montoya.http.message.HttpRequestResponse;
 
 public class EclipseScoutTableModel extends AbstractTableModel {
 
-  private String[] columnNames = new String[] { "Req#", "Res#", "Method", "Host", "Path" };
-  private List<EclipseScoutExchange> requestResponses = new ArrayList<>();
-  private TableRowSorter<EclipseScoutTableModel> tableRowSorter = new TableRowSorter<>(this);
+  private String[] columnNames = new String[] { "#", "Req#", "Res#", "Method", "Host", "Path" };
+  private List<EclipseScoutExchange> exchanges = new ArrayList<>();
 
   public EclipseScoutTableModel() {
-    Comparator<?> seqNrComparator = Comparator.nullsFirst((s1, s2) -> {
-      int n1, n2;
-      try {
-        n1 = Integer.parseInt(s1.toString());
-      } catch (NumberFormatException e) {
-        n1 = Integer.MIN_VALUE; // invalid strings first
-      }
-      try {
-        n2 = Integer.parseInt(s2.toString());
-      } catch (NumberFormatException e) {
-        n2 = Integer.MAX_VALUE;
-      }
-
-      return Integer.compare(n1, n2);
-    });
-    this.tableRowSorter.setComparator(0, seqNrComparator);
-    this.tableRowSorter.setComparator(1, seqNrComparator);
   }
 
   @Override
   public int getRowCount() {
-    return this.requestResponses.size();
+    return this.exchanges.size();
   }
 
   @Override
@@ -52,63 +33,85 @@ public class EclipseScoutTableModel extends AbstractTableModel {
 
   @Override
   public Object getValueAt(int rowIndex, int columnIndex) {
-    var requestResponse = this.requestResponses.get(rowIndex);
-    var request = requestResponse.request();
+    var exchange = this.exchanges.get(rowIndex);
+    var request = exchange.request();
     switch (columnIndex) {
       case 0:
-        return requestResponse.sequenceNrRequest() != null ? requestResponse.sequenceNrRequest() : "";
+        return exchange.nr() != null ? exchange.nr() : "";
       case 1:
-        return requestResponse.sequenceNrResponse() != null ? requestResponse.sequenceNrResponse() : "";
+        return exchange.sequenceNrRequest() != null ? exchange.sequenceNrRequest() : "";
       case 2:
-        return request.method();
+        return exchange.sequenceNrResponse() != null ? exchange.sequenceNrResponse() : "";
       case 3:
-        return request.headerValue("Host");
+        return request.method();
       case 4:
+        return request.headerValue("Host");
+      case 5:
         return request.path();
       default:
         return null;
     }
   }
 
-  public List<EclipseScoutExchange> getRequestResponses() {
-    return this.requestResponses;
+  public void moveRow(int from, int to) {
+    if (from == to) {
+      return;
+    }
+    var exchange = this.exchanges.remove(from);
+    this.exchanges.add(to, exchange);
+    this.fireTableDataChanged();
   }
 
-  public EclipseScoutExchange getRequestResponseAt(int row) {
-    return this.getRequestResponses().get(row);
+  public void sortByColumn(int column) {
+    switch (column) {
+      case 0:
+        this.exchanges.sort(Comparator.comparing(EclipseScoutExchange::nr, Comparator.nullsFirst(Comparator.naturalOrder())));
+        break;
+      case 1:
+        this.exchanges.sort(Comparator.comparing(EclipseScoutExchange::sequenceNrRequest, Comparator.nullsFirst(Comparator.naturalOrder())));
+        break;
+      case 2:
+        this.exchanges.sort(Comparator.comparing(EclipseScoutExchange::sequenceNrResponse, Comparator.nullsFirst(Comparator.naturalOrder())));
+        break;
+    }
+    this.fireTableDataChanged();
+  }
+
+  public List<EclipseScoutExchange> getExchanges() {
+    return this.exchanges;
+  }
+
+  public EclipseScoutExchange getExchangeAt(int row) {
+    return this.getExchanges().get(row);
   }
 
   public void setRequestResponseAt(int row, HttpRequestResponse requestResponse) {
-    this.setRequestResponseAt(row, new EclipseScoutExchange(requestResponse));
+    this.setExchangeAt(row, new EclipseScoutExchange(requestResponse));
   }
 
-  public void setRequestResponseAt(int row, EclipseScoutExchange requestResponse) {
-    this.requestResponses.set(row, requestResponse);
+  public void setExchangeAt(int row, EclipseScoutExchange exchange) {
+    this.exchanges.set(row, exchange);
     this.fireTableRowsUpdated(row, row);
   }
 
   public void addRequestResponse(HttpRequestResponse requestResponse) {
-    this.addRequestResponse(new EclipseScoutExchange(requestResponse));
+    this.addExchange(new EclipseScoutExchange(requestResponse));
   }
 
-  public void addRequestResponse(EclipseScoutExchange requestResponse) {
-    this.requestResponses.add(requestResponse);
+  public void addExchange(EclipseScoutExchange exchange) {
+    exchange.setNr(this.exchanges.size() + 1);
+    this.exchanges.add(exchange);
     this.fireTableDataChanged();
   }
 
-  public void removeRequestResponse(EclipseScoutExchange requestResponse) {
-    this.requestResponses.remove(requestResponse);
+  public void removeRequestResponse(EclipseScoutExchange exchange) {
+    this.exchanges.remove(exchange);
     this.fireTableDataChanged();
   }
 
-  public void setRequestResponses(List<EclipseScoutExchange> requestResponses) {
-    this.requestResponses = new ArrayList<>(
-        requestResponses.stream().map(EclipseScoutExchange::clone).toList());
+  public void setExchanges(List<EclipseScoutExchange> exchanges) {
+    this.exchanges = new ArrayList<>(exchanges.stream().map(EclipseScoutExchange::clone).toList());
     this.fireTableDataChanged();
-  }
-
-  public TableRowSorter<EclipseScoutTableModel> getTableRowSorter() {
-    return this.tableRowSorter;
   }
 
 }

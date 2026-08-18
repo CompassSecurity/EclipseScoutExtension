@@ -9,10 +9,11 @@ import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
 
 public class EclipseScoutExchange {
-
+  
   private HttpRequest request;
   private HttpResponse response;
 
+  private Integer nr;
   private Integer sequenceNrRequest;
   private Integer sequenceNrResponse;
   private String uiSessionId;
@@ -76,12 +77,20 @@ public class EclipseScoutExchange {
     return HttpRequestResponse.httpRequestResponse(this.request, this.response);
   }
 
+  public Integer nr() {
+    return this.nr;
+  }
+
   public Integer sequenceNrRequest() {
     return this.sequenceNrRequest;
   }
 
   public Integer sequenceNrResponse() {
     return this.sequenceNrResponse;
+  }
+
+  public void setNr(int nr) {
+    this.nr = nr;
   }
 
   public void setUiSessionId(String uiSessionId) {

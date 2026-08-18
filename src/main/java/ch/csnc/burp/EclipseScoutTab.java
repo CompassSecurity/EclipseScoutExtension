@@ -8,6 +8,8 @@ import java.awt.KeyboardFocusManager;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -17,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
+import javax.swing.DropMode;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
@@ -58,7 +61,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     var statusLabel = new JLabel();
     statusLabel.setForeground(Color.DARK_GRAY);
 
-    Consumer<String> logStatus = msg ->  {
+    Consumer<String> logStatus = msg -> {
       var now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("H:m:s"));
       statusLabel.setText("[%s] %s".formatted(now, msg));
     };
@@ -67,7 +70,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
 
     var status = new JPanel(new MigLayout());
     status.add(statusLabel);
-    
+
     this.sendSequence = new JButton("Send sequence");
     this.sendSequence.addActionListener(event -> {
       CompletableFuture.runAsync(() -> {
@@ -82,7 +85,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
         } finally {
           this.sendSequence.setEnabled(true);
         }
-      }).exceptionally(exc ->  {
+      }).exceptionally(exc -> {
         EclipseScoutExtension.api.logging().logToError(exc);
         return null;
       });
@@ -91,7 +94,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     var actions = new JPanel();
     actions.setLayout(new MigLayout());
     actions.add(this.sendSequence);
-    
+
     this.tableModel = new EclipseScoutTableModel();
 
     var tableDeleteSelectedItems = new JMenuItem("Delete selected items");
@@ -99,7 +102,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       var requestResponsesToDelete = new ArrayList<EclipseScoutExchange>();
       for (int viewIndex : this.table.getSelectedRows()) {
         var modelIndex = this.table.convertRowIndexToModel(viewIndex);
-        requestResponsesToDelete.add(this.tableModel.getRequestResponseAt(modelIndex));
+        requestResponsesToDelete.add(this.tableModel.getExchangeAt(modelIndex));
       }
       requestResponsesToDelete.forEach(this.tableModel::removeRequestResponse);
     });
@@ -108,20 +111,38 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     tableContextMenu.add(tableDeleteSelectedItems);
 
     this.table = new JTable(this.tableModel);
-    this.table.setRowSorter(this.tableModel.getTableRowSorter());
+    this.table.setDragEnabled(true);
+    this.table.setDropMode(DropMode.INSERT_ROWS);
+    this.table.setTransferHandler(new EclipseScoutTableRowTransferHandler(this.table, this.tableModel));
     this.table.setComponentPopupMenu(tableContextMenu);
     this.table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
-    this.table.getColumnModel().getColumn(2).setPreferredWidth(200);
-    this.table.getColumnModel().getColumn(3).setPreferredWidth(400);
+    this.table.getColumnModel().getColumn(0).setPreferredWidth(50);
+    this.table.getColumnModel().getColumn(1).setPreferredWidth(50);
+    this.table.getColumnModel().getColumn(2).setPreferredWidth(50);
+    this.table.getColumnModel().getColumn(3).setPreferredWidth(100);
+    this.table.getColumnModel().getColumn(4).setPreferredWidth(200);
+    this.table.getColumnModel().getColumn(5).setPreferredWidth(400);
     this.table.getSelectionModel().addListSelectionListener(event -> {
       if (!event.getValueIsAdjusting()) {
         this.selectedRow = this.table.getSelectedRow();
         if (selectedRow >= 0) {
           var modelIndex = this.table.convertRowIndexToModel(selectedRow);
-          var requestResponse = this.tableModel.getRequestResponseAt(modelIndex);
+          var requestResponse = this.tableModel.getExchangeAt(modelIndex);
           requestEditor.setRequest(requestResponse.request());
           responseEditor.setResponse(requestResponse.response());
         }
+      }
+    });
+    this.table.getTableHeader().addMouseListener(new MouseAdapter() {
+      @Override
+      public void mouseClicked(MouseEvent e) {
+        int viewColumn = table.columnAtPoint(e.getPoint());
+        if (viewColumn < 0) {
+          return;
+        }
+        int modelColumn = table.convertColumnIndexToModel(viewColumn);
+        EclipseScoutTableModel model = (EclipseScoutTableModel) table.getModel();
+        model.sortByColumn(modelColumn);
       }
     });
 
@@ -134,11 +155,12 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     this.requestEditor = EclipseScoutExtension.api.userInterface().createHttpRequestEditor();
     this.responseEditor = EclipseScoutExtension.api.userInterface().createHttpResponseEditor(EditorOptions.READ_ONLY);
 
-    var lower = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, this.requestEditor.uiComponent(), this.responseEditor.uiComponent());
+    var lower = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, this.requestEditor.uiComponent(),
+        this.responseEditor.uiComponent());
     lower.setResizeWeight(0.5);
-    
+
     var upperLower = new JSplitPane(JSplitPane.VERTICAL_SPLIT, upper, lower);
-    
+
     this.panel = new JPanel();
     this.panel.setLayout(new BorderLayout());
     this.panel.add(upperLower, BorderLayout.CENTER);
@@ -149,7 +171,8 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
           try {
             if (selectedRow >= 0 && requestEditor.isModified()) {
               var modelIndex = table.convertRowIndexToModel(selectedRow);
-              var editedRequestResponse = HttpRequestResponse.httpRequestResponse(requestEditor.getRequest(), responseEditor.getResponse());
+              var editedRequestResponse = HttpRequestResponse.httpRequestResponse(requestEditor.getRequest(),
+                  responseEditor.getResponse());
               tableModel.setRequestResponseAt(modelIndex, editedRequestResponse);
             }
           } catch (Exception exc) {
@@ -158,15 +181,15 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
           return false;
         }
       };
-  
+
       @Override
       public void componentShown(ComponentEvent event) {
-        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(this.keyEventDispatcher);        
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(this.keyEventDispatcher);
       }
 
       @Override
       public void componentHidden(ComponentEvent event) {
-        KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(this.keyEventDispatcher);        
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(this.keyEventDispatcher);
       }
     });
   }
@@ -183,7 +206,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     var requestResponses = new ArrayList<EclipseScoutExchange>();
     for (int i = 0; i < this.table.getRowCount(); i++) {
       var modelIndex = this.table.convertRowIndexToModel(i);
-      requestResponses.add(this.tableModel.getRequestResponseAt(modelIndex));
+      requestResponses.add(this.tableModel.getExchangeAt(modelIndex));
     }
     return requestResponses;
   }
@@ -195,7 +218,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       sequence.next().send();
     }
   }
-  
+
   @Override
   public List<Component> provideMenuItems(ContextMenuEvent event) {
     var sendTo = new JMenuItem("Send to %s".formatted(EclipseScoutExtension.NAME));
@@ -222,7 +245,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
             requestResponse.send();
           }
         }
-      } 
+      }
     } catch (Exception exc) {
       EclipseScoutExtension.api.logging().logToError(exc);
     }
@@ -233,11 +256,10 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
   public ResponseReceivedAction handleHttpResponseReceived(HttpResponseReceived responseReceived) {
     var sequence = this.sequences.remove(responseReceived.messageId());
     if (sequence != null) {
-      while(sequence.hasNext()) {
+      while (sequence.hasNext()) {
         sequence.next().send();
       }
     }
     return ResponseReceivedAction.continueWith(responseReceived);
   }
 }
-
