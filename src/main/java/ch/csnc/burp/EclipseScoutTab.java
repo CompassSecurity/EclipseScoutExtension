@@ -232,7 +232,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
   public RequestToBeSentAction handleHttpRequestToBeSent(HttpRequestToBeSent requestToBeSent) {
     try {
       if (requestToBeSent.hasHeader(ECLIPSE_SCOUT_HEADER)) {
-        var sequenceNr = new EclipseScoutExchange(requestToBeSent).sequenceNrRequest();
+        var sequenceNr = Integer.parseInt(requestToBeSent.headerValue(ECLIPSE_SCOUT_HEADER));
         var sequence = new EclipseScoutSequence(this.getRequestResponesAsDisplayed());
         this.sequences.put(requestToBeSent.messageId(), sequence);
         while (sequence.hasNext()) {
