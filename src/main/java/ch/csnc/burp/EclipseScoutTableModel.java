@@ -86,7 +86,10 @@ public class EclipseScoutTableModel extends AbstractTableModel {
   }
 
   public void setRequestResponseAt(int row, HttpRequestResponse requestResponse) {
-    this.setExchangeAt(row, new EclipseScoutExchange(requestResponse));
+    var nr = this.exchanges.get(row).nr();
+    var exchange = new EclipseScoutExchange(requestResponse);
+    exchange.setNr(nr);
+    this.setExchangeAt(row, exchange);
   }
 
   public void setExchangeAt(int row, EclipseScoutExchange exchange) {

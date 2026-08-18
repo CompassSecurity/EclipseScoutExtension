@@ -104,7 +104,13 @@ public class EclipseScoutExchange {
     }
   }
 
-  public void setSequenceNrRequest(int n) {
+  /**
+   * Overwrites the "#" sequence number in the request body with {@code n}. Used only when
+   * an exchange is auto-replayed as part of a sequence, to keep the body's sequence number
+   * contiguous. This never touches {@link #sequenceNrRequest()}, which stays whatever was
+   * originally captured in the body for display purposes.
+   */
+  public void renumberSequenceNr(int n) {
     try {
       var jsonObj = new JSONObject(this.request.bodyToString());
       jsonObj.put("#", n);
@@ -119,11 +125,6 @@ public class EclipseScoutExchange {
     return this;
   }
 
-  public EclipseScoutExchange withSequenceNrRequest(int n) {
-    this.setSequenceNrRequest(n);
-    return this;
-  }
-
   public String getUiSessionId() {
     return this.uiSessionId;
   }
@@ -134,7 +135,9 @@ public class EclipseScoutExchange {
     if (this.response != null) {
       clonedResponse = HttpResponse.httpResponse(this.response.toByteArray());
     }
-    return new EclipseScoutExchange(HttpRequestResponse.httpRequestResponse(clonedRequest, clonedResponse));
+    var cloned = new EclipseScoutExchange(HttpRequestResponse.httpRequestResponse(clonedRequest, clonedResponse));
+    cloned.nr = this.nr;
+    return cloned;
   }
 
   public void send() {
