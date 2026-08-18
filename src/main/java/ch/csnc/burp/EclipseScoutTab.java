@@ -107,7 +107,30 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       requestResponsesToDelete.forEach(this.tableModel::removeRequestResponse);
     });
 
+    var tableSendToRepeater = new JMenuItem("Send to Repeater");
+    tableSendToRepeater.addActionListener(event -> {
+      for (int viewIndex : this.table.getSelectedRows()) {
+        var modelIndex = this.table.convertRowIndexToModel(viewIndex);
+        var exchange = this.tableModel.getExchangeAt(modelIndex);
+        var request = exchange.request().withHeader(ECLIPSE_SCOUT_HEADER, String.valueOf(viewIndex));
+        EclipseScoutExtension.api.repeater().sendToRepeater(request);
+      }
+    });
+
+    var tableSendToIntruder = new JMenuItem("Send to Intruder");
+    tableSendToIntruder.addActionListener(event -> {
+      for (int viewIndex : this.table.getSelectedRows()) {
+        var modelIndex = this.table.convertRowIndexToModel(viewIndex);
+        var exchange = this.tableModel.getExchangeAt(modelIndex);
+        var request = exchange.request().withHeader(ECLIPSE_SCOUT_HEADER, String.valueOf(viewIndex));
+        EclipseScoutExtension.api.intruder().sendToIntruder(request);
+      }
+    });
+
     var tableContextMenu = new JPopupMenu();
+    tableContextMenu.add(tableSendToRepeater);
+    tableContextMenu.add(tableSendToIntruder);
+    tableContextMenu.addSeparator();
     tableContextMenu.add(tableDeleteSelectedItems);
 
     this.table = new JTable(this.tableModel);
