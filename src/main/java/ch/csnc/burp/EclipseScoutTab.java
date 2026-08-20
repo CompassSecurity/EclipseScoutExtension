@@ -142,9 +142,21 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       }
     });
 
+    var tableSendToOrganizer = new JMenuItem("Send to Organizer");
+    tableSendToOrganizer.addActionListener(event -> {
+      for (int viewIndex : this.table.getSelectedRows()) {
+        var modelIndex = this.table.convertRowIndexToModel(viewIndex);
+        var exchange = this.tableModel.getExchangeAt(modelIndex);
+        var request = exchange.request().withHeader(REQUEST_HEADER, String.valueOf(exchange.nr()));
+        var requestResponse = HttpRequestResponse.httpRequestResponse(request, exchange.response());
+        EclipseScoutExtension.api.organizer().sendToOrganizer(requestResponse);
+      }
+    });
+
     var tableContextMenu = new JPopupMenu();
     tableContextMenu.add(tableSendToRepeater);
     tableContextMenu.add(tableSendToIntruder);
+    tableContextMenu.add(tableSendToOrganizer);
     tableContextMenu.addSeparator();
     tableContextMenu.add(tableDeleteSelectedItems);
 
