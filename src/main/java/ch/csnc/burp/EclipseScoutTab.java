@@ -55,6 +55,8 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
   private JPanel panel;
 
   private int selectedRow = -1;
+  private volatile boolean sequenceRunning = false;
+  private volatile boolean cancelRequested = false;
 
   private record PendingSequence(EclipseScoutSequence sequence, EclipseScoutExchange targetExchange, Integer showNr) {
   }
@@ -77,17 +79,26 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
 
     this.sendSequence = new JButton("Send sequence");
     this.sendSequence.addActionListener(event -> {
+      if (this.sequenceRunning) {
+        this.cancelRequested = true;
+        logStatus.accept("cancelling...");
+        return;
+      }
+      this.cancelRequested = false;
+      this.sequenceRunning = true;
+      this.sendSequence.setText("Cancel sequence");
       CompletableFuture.runAsync(() -> {
         try {
           logStatus.accept("sending sequence");
-          this.sendSequence.setEnabled(false);
           sendSequence();
-          logStatus.accept("done");
+          logStatus.accept(this.cancelRequested ? "cancelled" : "done");
         } catch (Exception exc) {
           EclipseScoutExtension.api.logging().logToError(exc);
           logStatus.accept(exc.getMessage());
         } finally {
-          this.sendSequence.setEnabled(true);
+          this.sequenceRunning = false;
+          this.cancelRequested = false;
+          this.sendSequence.setText("Send sequence");
         }
       }).exceptionally(exc -> {
         EclipseScoutExtension.api.logging().logToError(exc);
@@ -241,7 +252,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
   public void sendSequence() {
     var requestResponses = this.getRequestResponesAsDisplayed();
     var sequence = new EclipseScoutSequence(requestResponses);
-    while (sequence.hasNext()) {
+    while (sequence.hasNext() && !this.cancelRequested) {
       sequence.next().send();
     }
   }
@@ -287,8 +298,17 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     var pending = this.sequences.remove(responseReceived.messageId());
     if (pending != null) {
       pending.targetExchange().setResponse(responseReceived);
-      while (pending.sequence().hasNext()) {
-        pending.sequence().next().send();
+      this.cancelRequested = false;
+      this.sequenceRunning = true;
+      this.sendSequence.setText("Cancel sequence");
+      try {
+        while (pending.sequence().hasNext() && !this.cancelRequested) {
+          pending.sequence().next().send();
+        }
+      } finally {
+        this.sequenceRunning = false;
+        this.cancelRequested = false;
+        this.sendSequence.setText("Send sequence");
       }
       if (pending.showNr() != null) {
         var toShow = pending.sequence().exchangeWithNr(pending.showNr());
