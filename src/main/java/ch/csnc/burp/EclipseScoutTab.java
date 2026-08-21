@@ -3,6 +3,7 @@ package ch.csnc.burp;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.KeyEventDispatcher;
 import java.awt.KeyboardFocusManager;
 import java.awt.event.ComponentAdapter;
@@ -50,6 +51,8 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
   private JButton sendSequence;
   private EclipseScoutTableModel tableModel;
   private JTable table;
+  private EclipseScoutVariableTableModel variableTableModel;
+  private JTable variableTable;
   private HttpRequestEditor requestEditor;
   private HttpResponseEditor responseEditor;
   private JPanel panel;
@@ -111,6 +114,12 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     actions.add(this.sendSequence);
 
     this.tableModel = new EclipseScoutTableModel();
+
+    this.variableTableModel = new EclipseScoutVariableTableModel(exchangeNr -> this.tableModel.getExchanges().stream()
+        .filter(exchange -> exchangeNr.equals(exchange.nr()))
+        .findFirst()
+        .orElse(null));
+    this.tableModel.addTableModelListener(event -> this.variableTableModel.refreshPreview());
 
     var tableDeleteSelectedItems = new JMenuItem("Delete selected items");
     tableDeleteSelectedItems.addActionListener(event -> {
@@ -194,11 +203,52 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       }
     });
 
+    this.variableTable = new JTable(this.variableTableModel);
+    this.variableTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+    this.variableTable.getColumnModel().getColumn(0).setPreferredWidth(70);
+    this.variableTable.getColumnModel().getColumn(1).setPreferredWidth(100);
+    this.variableTable.getColumnModel().getColumn(2).setPreferredWidth(150);
+    this.variableTable.getColumnModel().getColumn(3).setPreferredWidth(150);
+    this.variableTable.setPreferredScrollableViewportSize(
+        new Dimension(this.variableTable.getPreferredScrollableViewportSize().width,
+            this.variableTable.getRowHeight() * 5));
+
+    var addVariable = new JButton("+");
+    addVariable.addActionListener(event -> {
+      Integer exchangeNr = null;
+      if (this.selectedRow >= 0) {
+        var modelIndex = this.table.convertRowIndexToModel(this.selectedRow);
+        exchangeNr = this.tableModel.getExchangeAt(modelIndex).nr();
+      }
+      this.variableTableModel.addVariable(exchangeNr);
+    });
+
+    var removeVariable = new JButton("-");
+    removeVariable.addActionListener(event -> {
+      var variablesToRemove = new ArrayList<EclipseScoutVariable>();
+      for (int viewIndex : this.variableTable.getSelectedRows()) {
+        var modelIndex = this.variableTable.convertRowIndexToModel(viewIndex);
+        variablesToRemove.add(this.variableTableModel.getVariableAt(modelIndex));
+      }
+      this.variableTableModel.removeVariables(variablesToRemove);
+    });
+
+    var variableButtons = new JPanel(new MigLayout());
+    variableButtons.add(new JLabel("Variables"));
+    variableButtons.add(addVariable);
+    variableButtons.add(removeVariable);
+
+    var variables = new JPanel();
+    variables.setLayout(new MigLayout("fill, wrap 1, insets 0"));
+    variables.add(variableButtons);
+    variables.add(new JScrollPane(this.variableTable), "grow, push");
+
     var upper = new JPanel();
     upper.setLayout(new MigLayout("fill"));
     upper.add(actions, "dock west");
-    upper.add(new JScrollPane(this.table), "grow");
     upper.add(status, "dock south, h 30!");
+    upper.add(variables, "dock south, h pref!");
+    upper.add(new JScrollPane(this.table), "grow");
 
     this.requestEditor = EclipseScoutExtension.api.userInterface().createHttpRequestEditor();
     this.responseEditor = EclipseScoutExtension.api.userInterface().createHttpResponseEditor(EditorOptions.READ_ONLY);
@@ -261,7 +311,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
 
   public void sendSequence() {
     var requestResponses = this.getRequestResponesAsDisplayed();
-    var sequence = new EclipseScoutSequence(requestResponses);
+    var sequence = new EclipseScoutSequence(requestResponses, this.variableTableModel.getVariables());
     while (sequence.hasNext() && !this.cancelRequested) {
       sequence.next().send();
     }
@@ -286,7 +336,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
             : null;
         var request = requestToBeSent.withRemovedHeader(REQUEST_HEADER).withRemovedHeader(RESPONSE_HEADER);
 
-        var sequence = new EclipseScoutSequence(this.getRequestResponesAsDisplayed());
+        var sequence = new EclipseScoutSequence(this.getRequestResponesAsDisplayed(), this.variableTableModel.getVariables());
         var targetIndex = sequence.indexOfNr(nr);
         if (targetIndex < 0) {
           EclipseScoutExtension.api.logging().logToError("No row with # %d found, sending as-is".formatted(nr));

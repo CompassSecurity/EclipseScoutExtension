@@ -57,6 +57,14 @@ public class EclipseScoutSequence {
 
   private List<EclipseScoutExchange> exchanges;
 
+  private final List<EclipseScoutVariable> variableDefinitions;
+
+  /**
+   * Current value of each variable, as most recently extracted from a response during this
+   * replay run - global across the whole sequence, not per-exchange. Starts empty each run.
+   */
+  private final Map<String, String> variableValues = new HashMap<>();
+
   private final IdentityResolver adapterResolver = new IdentityResolver();
   private final IdentityResolver nodeResolver = new IdentityResolver();
 
@@ -71,8 +79,9 @@ public class EclipseScoutSequence {
    */
   private final Map<String, String> replayNodeIdToRowId = new HashMap<>();
 
-  public EclipseScoutSequence(List<EclipseScoutExchange> exchanges) {
+  public EclipseScoutSequence(List<EclipseScoutExchange> exchanges, List<EclipseScoutVariable> variableDefinitions) {
     this.exchanges = exchanges.stream().map(EclipseScoutExchange::clone).toList();
+    this.variableDefinitions = variableDefinitions;
     for (var exchange : this.exchanges) {
       this.adapterResolver.learnOriginal(exchange.responseAdapterClassIds());
       this.nodeResolver.learnOriginal(exchange.responseNodeClassIds());
@@ -86,17 +95,21 @@ public class EclipseScoutSequence {
 
   /**
    * Returns the next exchange in display order, propagating the UI session id from the
-   * previous exchange, renumbering its body's "#" sequence number to match its position, and
+   * previous exchange, renumbering its body's "#" sequence number to match its position,
    * remapping "target"/"nodeId"/"rowId" ids in its request via classId-based identity
-   * matching: an id captured against the original session is resolved to whatever id that same
-   * structural widget/node (same classId) - or, for rows, the node it mirrors - was assigned
-   * during THIS replay run. This keeps the sequence pointed at the right widget even when
-   * replay assigns different numeric ids - e.g. because an earlier step in the sequence added
-   * something that shifted every id created after it.
+   * matching, and substituting any {@code $VAR:name$} placeholders in its request with the
+   * variables' current values: an id captured against the original session is resolved to
+   * whatever id that same structural widget/node (same classId) - or, for rows, the node it
+   * mirrors - was assigned during THIS replay run. This keeps the sequence pointed at the right
+   * widget even when replay assigns different numeric ids - e.g. because an earlier step in the
+   * sequence added something that shifted every id created after it.
    *
    * <p>Relies on the previous exchange already having been sent (its response set) before this
    * is called - true both for the plain send loop ({@code next().send()} repeated) and for
-   * {@link #advanceTo(int)}, and required already for UI session id propagation above.
+   * {@link #advanceTo(int)}, and required already for UI session id propagation above. That
+   * same response is where each variable's current value is (re-)extracted from, before it's
+   * substituted into the exchange this call returns - so a value captured from one step is
+   * available to the very next one.
    */
   public EclipseScoutExchange next() {
     var exchange = this.exchanges.get(this.position);
@@ -107,9 +120,11 @@ public class EclipseScoutSequence {
       this.nodeResolver.learnReplay(previous.responseNodeClassIds());
       previous.responseRowNodeIds()
           .forEach((rowId, nodeId) -> this.replayNodeIdToRowId.putIfAbsent(nodeId, rowId));
+      this.variableValues.putAll(previous.extractVariables(this.variableDefinitions));
     }
     exchange.renumberSequenceNr(this.position);
     exchange.remapIds(this.adapterResolver::resolve, this.nodeResolver::resolve, this::resolveRowId);
+    exchange.substituteVariables(this.variableValues);
     this.position++;
     return exchange;
   }

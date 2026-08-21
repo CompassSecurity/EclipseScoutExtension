@@ -4,9 +4,11 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -63,6 +65,10 @@ public class EclipseScoutExchange {
 
   private static ByteArray jsonBody(HttpMessage originalMessage, JSONObject jsonObj) {
     return ByteArray.byteArray(jsonObj.toString().getBytes(jsonCharset(originalMessage)));
+  }
+
+  private static ByteArray jsonBody(HttpMessage originalMessage, String text) {
+    return ByteArray.byteArray(text.getBytes(jsonCharset(originalMessage)));
   }
 
   public EclipseScoutExchange(HttpRequest request) {
@@ -317,6 +323,88 @@ public class EclipseScoutExchange {
     } catch (JSONException exc) {
       // ignore
     }
+  }
+
+  /**
+   * The response body as text, decoded per {@link #jsonCharset(HttpMessage)}, or {@code null}
+   * if this exchange has no response yet. Used both for live variable-regex preview in the UI
+   * and for extraction during replay.
+   */
+  public String responseBodyText() {
+    return this.response != null ? jsonBody(this.response) : null;
+  }
+
+  /**
+   * Runs the regex of each variable declared against this specific exchange (matched by
+   * {@link #nr()} against {@link EclipseScoutVariable#exchangeNr()}) on this exchange's response
+   * body, returning the values of those that matched (capture group 1 if the regex has one,
+   * otherwise the whole match). A variable targeting a different exchange, or with a blank
+   * name/regex, or whose regex doesn't match, is omitted from the result.
+   */
+  public Map<String, String> extractVariables(List<EclipseScoutVariable> variables) {
+    var result = new HashMap<String, String>();
+    var body = this.responseBodyText();
+    if (body == null || this.nr == null) {
+      return result;
+    }
+    for (var variable : variables) {
+      if (!this.nr.equals(variable.exchangeNr())) {
+        continue;
+      }
+      if (variable.name() == null || variable.name().isBlank() || variable.regex() == null
+          || variable.regex().isBlank()) {
+        continue;
+      }
+      try {
+        var matcher = Pattern.compile(variable.regex()).matcher(body);
+        if (matcher.find()) {
+          result.put(variable.name(), matcher.groupCount() >= 1 ? matcher.group(1) : matcher.group(0));
+        }
+      } catch (PatternSyntaxException exc) {
+        // ignore invalid regex
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Replaces every {@code $VAR:name$} placeholder found in this exchange's request path, header
+   * values, or body with the current value of the variable named {@code name}, for each entry in
+   * {@code variableValues}. A variable with no current value (not yet extracted from an earlier
+   * response) is left as-is.
+   *
+   * <p>The body is only rewritten if decoding it with its declared charset and substituting
+   * actually changes something - so a non-text body (e.g. a multipart file upload's binary part)
+   * is left byte-for-byte untouched rather than round-tripped through a text charset, which for
+   * arbitrary binary content would be lossy.
+   */
+  public void substituteVariables(Map<String, String> variableValues) {
+    var path = this.request.path();
+    var updatedPath = substitutePlaceholders(path, variableValues);
+    if (!updatedPath.equals(path)) {
+      this.request = this.request.withPath(updatedPath);
+    }
+    var body = jsonBody(this.request);
+    var updatedBody = substitutePlaceholders(body, variableValues);
+    if (!updatedBody.equals(body)) {
+      this.request = this.request.withBody(jsonBody(this.request, updatedBody));
+    }
+    for (var header : new ArrayList<>(this.request.headers())) {
+      var updatedValue = substitutePlaceholders(header.value(), variableValues);
+      if (!updatedValue.equals(header.value())) {
+        this.request = this.request.withUpdatedHeader(header.name(), updatedValue);
+      }
+    }
+  }
+
+  private static String substitutePlaceholders(String text, Map<String, String> variableValues) {
+    var updated = text;
+    for (var entry : variableValues.entrySet()) {
+      if (entry.getValue() != null) {
+        updated = updated.replace("$VAR:" + entry.getKey() + "$", entry.getValue());
+      }
+    }
+    return updated;
   }
 
   private static void remapIdsRecursive(Object node, Function<String, String> targetResolver,
