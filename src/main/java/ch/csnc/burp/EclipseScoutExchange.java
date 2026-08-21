@@ -1,21 +1,26 @@
 package ch.csnc.burp;
 
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import burp.api.montoya.core.ByteArray;
 import burp.api.montoya.http.message.ContentType;
+import burp.api.montoya.http.message.HttpMessage;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
 
 public class EclipseScoutExchange {
-  
+
   private HttpRequest request;
   private HttpResponse response;
 
@@ -23,6 +28,42 @@ public class EclipseScoutExchange {
   private Integer sequenceNrRequest;
   private Integer sequenceNrResponse;
   private String uiSessionId;
+
+  private static final Pattern CHARSET_PATTERN =
+      Pattern.compile("charset\\s*=\\s*\"?([^;\"\\s]+)", Pattern.CASE_INSENSITIVE);
+
+  /**
+   * {@link HttpMessage#bodyToString()} decodes body bytes using a fixed internal charset that
+   * ignores both the message's own "Content-Type" header and Burp's "message editor character
+   * sets" display setting, while {@link HttpRequest#withBody(String)} encodes using UTF-8 - an
+   * asymmetry that silently mangles non-ASCII characters (e.g. curly quotes) on any body that
+   * gets read then written back. Scout's UI protocol always declares "charset=UTF-8" anyway, so
+   * bodies are read/written here as raw bytes, decoded/encoded explicitly using the charset from
+   * the message's Content-Type header (defaulting to UTF-8 if absent), bypassing bodyToString()/
+   * withBody(String) entirely.
+   */
+  private static Charset jsonCharset(HttpMessage message) {
+    var contentType = message.header("Content-Type");
+    if (contentType != null) {
+      var matcher = CHARSET_PATTERN.matcher(contentType.value());
+      if (matcher.find()) {
+        try {
+          return Charset.forName(matcher.group(1));
+        } catch (Exception exc) {
+          // unrecognized charset name, fall back to UTF-8 below
+        }
+      }
+    }
+    return StandardCharsets.UTF_8;
+  }
+
+  private static String jsonBody(HttpMessage message) {
+    return new String(message.body().getBytes(), jsonCharset(message));
+  }
+
+  private static ByteArray jsonBody(HttpMessage originalMessage, JSONObject jsonObj) {
+    return ByteArray.byteArray(jsonObj.toString().getBytes(jsonCharset(originalMessage)));
+  }
 
   public EclipseScoutExchange(HttpRequest request) {
     this(HttpRequestResponse.httpRequestResponse(request, null));
@@ -38,7 +79,7 @@ public class EclipseScoutExchange {
     if (this.request.contentType() == ContentType.JSON) {
       try {
         {
-          var body = this.request.bodyToString().strip();
+          var body = jsonBody(this.request).strip();
           if (body.startsWith("{")) {
             var jsonObj = new JSONObject(body);
             this.sequenceNrRequest = jsonObj.has("#") ? jsonObj.getInt("#") : null;
@@ -46,7 +87,7 @@ public class EclipseScoutExchange {
         }
         {
           if (this.response != null) {
-            var body = this.response.bodyToString().strip();
+            var body = jsonBody(this.response).strip();
             if (body.startsWith("{")) {
               var jsonObj = new JSONObject(body);
               this.sequenceNrResponse = jsonObj.has("#") ? jsonObj.getInt("#") : null;
@@ -71,7 +112,7 @@ public class EclipseScoutExchange {
   public void setResponse(HttpResponse response) {
     this.response = response;
     try {
-      var jsonObj = new JSONObject(response.bodyToString());
+      var jsonObj = new JSONObject(jsonBody(response));
       var startupData = jsonObj.getJSONObject("startupData");
       this.uiSessionId = startupData.getString("uiSessionId");
     } catch (JSONException exc) {
@@ -102,9 +143,9 @@ public class EclipseScoutExchange {
   public void setUiSessionId(String uiSessionId) {
     this.uiSessionId = uiSessionId;
     try {
-      var jsonObj = new JSONObject(this.request.bodyToString());
+      var jsonObj = new JSONObject(jsonBody(this.request));
       jsonObj.put("uiSessionId", uiSessionId);
-      this.request = this.request.withBody(jsonObj.toString());
+      this.request = this.request.withBody(jsonBody(this.request, jsonObj));
     } catch (JSONException exc) {
       // ignore
     }
@@ -118,9 +159,9 @@ public class EclipseScoutExchange {
    */
   public void renumberSequenceNr(int n) {
     try {
-      var jsonObj = new JSONObject(this.request.bodyToString());
+      var jsonObj = new JSONObject(jsonBody(this.request));
       jsonObj.put("#", n);
-      this.request = this.request.withBody(jsonObj.toString());
+      this.request = this.request.withBody(jsonBody(this.request, jsonObj));
     } catch (JSONException exc) {
       // ignore
     }
@@ -138,7 +179,7 @@ public class EclipseScoutExchange {
       return Map.of();
     }
     try {
-      var body = this.response.bodyToString().strip();
+      var body = jsonBody(this.response).strip();
       if (!body.startsWith("{")) {
         return Map.of();
       }
@@ -171,7 +212,7 @@ public class EclipseScoutExchange {
       return Map.of();
     }
     try {
-      var body = this.response.bodyToString().strip();
+      var body = jsonBody(this.response).strip();
       if (!body.startsWith("{")) {
         return Map.of();
       }
@@ -225,7 +266,7 @@ public class EclipseScoutExchange {
       return Map.of();
     }
     try {
-      var body = this.response.bodyToString().strip();
+      var body = jsonBody(this.response).strip();
       if (!body.startsWith("{")) {
         return Map.of();
       }
@@ -270,9 +311,9 @@ public class EclipseScoutExchange {
   public void remapIds(Function<String, String> targetResolver, Function<String, String> nodeIdResolver,
       Function<String, String> rowIdResolver) {
     try {
-      var jsonObj = new JSONObject(this.request.bodyToString());
+      var jsonObj = new JSONObject(jsonBody(this.request));
       remapIdsRecursive(jsonObj, targetResolver, nodeIdResolver, rowIdResolver);
-      this.request = this.request.withBody(jsonObj.toString());
+      this.request = this.request.withBody(jsonBody(this.request, jsonObj));
     } catch (JSONException exc) {
       // ignore
     }
