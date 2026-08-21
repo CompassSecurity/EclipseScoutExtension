@@ -2,6 +2,7 @@ package ch.csnc.burp;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.nio.charset.Charset;
 
 import burp.api.montoya.BurpExtension;
 import burp.api.montoya.MontoyaApi;
@@ -17,6 +18,7 @@ public class EclipseScoutExtension implements BurpExtension {
     EclipseScoutExtension.api = api;
     api.extension().setName(NAME);
     api.logging().logToOutput("%s loaded".formatted(NAME));
+    api.logging().logToOutput("Charset: %s".formatted(Charset.defaultCharset()));
 
     var versionTxt = "/version.txt";
     try (var stream = getClass().getResourceAsStream(versionTxt)) {
