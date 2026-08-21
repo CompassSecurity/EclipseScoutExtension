@@ -344,8 +344,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
         }
         var targetExchange = sequence.advanceTo(targetIndex);
         this.sequences.put(requestToBeSent.messageId(), new PendingSequence(sequence, targetExchange, showNr));
-        request = new EclipseScoutExchange(request).withUiSessionId(targetExchange.getUiSessionId()).request();
-        return RequestToBeSentAction.continueWith(request);
+        return RequestToBeSentAction.continueWith(targetExchange.request());
       }
     } catch (Exception exc) {
       EclipseScoutExtension.api.logging().logToError(exc);
