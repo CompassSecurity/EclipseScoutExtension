@@ -28,10 +28,12 @@ import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
+import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 
 import burp.api.montoya.http.handler.HttpHandler;
@@ -110,9 +112,37 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       });
     });
 
+    var setHeader = new JButton("Set header");
+    setHeader.addActionListener(event -> {
+      var nameField = new JTextField();
+      var valueField = new JTextField(20);
+      var fields = new JPanel(new MigLayout("wrap 2", "[][grow, fill]"));
+      fields.add(new JLabel("Header name:"));
+      fields.add(nameField);
+      fields.add(new JLabel("Header value:"));
+      fields.add(valueField);
+      var result = JOptionPane.showConfirmDialog(this.panel, fields, "Set header", JOptionPane.OK_CANCEL_OPTION);
+      if (result != JOptionPane.OK_OPTION) {
+        return;
+      }
+      var name = nameField.getText().strip();
+      if (name.isEmpty()) {
+        return;
+      }
+      var value = valueField.getText();
+      this.commitEditorEdits();
+      this.tableModel.getExchanges().forEach(exchange -> exchange.setHeader(name, value));
+      this.tableModel.fireTableDataChanged();
+      if (this.selectedRow >= 0) {
+        var modelIndex = this.table.convertRowIndexToModel(this.selectedRow);
+        this.requestEditor.setRequest(this.tableModel.getExchangeAt(modelIndex).request());
+      }
+    });
+
     var actions = new JPanel();
-    actions.setLayout(new MigLayout());
-    actions.add(this.sendSequence);
+    actions.setLayout(new MigLayout("wrap 1"));
+    actions.add(this.sendSequence, "growx");
+    actions.add(setHeader, "growx");
 
     this.tableModel = new EclipseScoutTableModel();
 

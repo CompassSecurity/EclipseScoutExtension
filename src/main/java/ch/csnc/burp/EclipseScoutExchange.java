@@ -178,6 +178,14 @@ public class EclipseScoutExchange {
     this.request = this.request.withHeader(REQUEST_HEADER, String.valueOf(nr));
   }
 
+  /**
+   * Adds or updates (if already present) a header on this exchange's request - e.g. to refresh a
+   * stale Cookie or Authorization header across an entire captured sequence at once.
+   */
+  public void setHeader(String name, String value) {
+    this.request = this.request.withHeader(name, value);
+  }
+
   public void setUiSessionId(String uiSessionId) {
     this.uiSessionId = uiSessionId;
     try {
