@@ -35,6 +35,15 @@ public class EclipseScoutExchange {
    */
   static final String REQUEST_HEADER = "X-Scout-Request";
 
+  /**
+   * Tags a request sent to Repeater/Intruder with the {@link #nr()} of a different row, telling
+   * {@code EclipseScoutTab.handleHttpResponseReceived} to show that row's response back in the
+   * Repeater/Intruder tab once the sequence has replayed far enough to reach it, instead of the
+   * response to the request actually sent there. Like {@link #REQUEST_HEADER}, always stripped
+   * before the request goes out over the wire.
+   */
+  static final String RESPONSE_HEADER = "X-Scout-Response";
+
   private HttpRequest request;
   private HttpResponse response;
 

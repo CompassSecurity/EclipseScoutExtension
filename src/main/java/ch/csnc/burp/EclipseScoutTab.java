@@ -50,8 +50,6 @@ import net.miginfocom.swing.MigLayout;
 
 public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
 
-  private static final String RESPONSE_HEADER = "X-Scout-Response";
-
   private JButton sendSequence;
   private EclipseScoutTableModel tableModel;
   private JTable table;
@@ -386,11 +384,11 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     try {
       if (requestToBeSent.hasHeader(EclipseScoutExchange.REQUEST_HEADER)) {
         var nr = Integer.parseInt(requestToBeSent.headerValue(EclipseScoutExchange.REQUEST_HEADER));
-        Integer showNr = requestToBeSent.hasHeader(RESPONSE_HEADER)
-            ? Integer.parseInt(requestToBeSent.headerValue(RESPONSE_HEADER))
+        Integer showNr = requestToBeSent.hasHeader(EclipseScoutExchange.RESPONSE_HEADER)
+            ? Integer.parseInt(requestToBeSent.headerValue(EclipseScoutExchange.RESPONSE_HEADER))
             : null;
         var request = requestToBeSent.withRemovedHeader(EclipseScoutExchange.REQUEST_HEADER)
-            .withRemovedHeader(RESPONSE_HEADER);
+            .withRemovedHeader(EclipseScoutExchange.RESPONSE_HEADER);
 
         var sequence = new EclipseScoutSequence(this.getRequestResponesAsDisplayed(), this.variableTableModel.getVariables());
         var targetIndex = sequence.indexOfNr(nr);
