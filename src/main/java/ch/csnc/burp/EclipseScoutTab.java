@@ -29,7 +29,6 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
@@ -123,38 +122,34 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
         .orElse(null));
     this.tableModel.addTableModelListener(event -> this.variableTableModel.refreshPreview());
 
-    var tableDeleteSelectedItems = new JMenuItem("Delete selected items");
-    tableDeleteSelectedItems.addActionListener(event -> {
+    Runnable tableDeleteSelectedItems = () -> {
       var requestResponsesToDelete = new ArrayList<EclipseScoutExchange>();
       for (int viewIndex : this.table.getSelectedRows()) {
         var modelIndex = this.table.convertRowIndexToModel(viewIndex);
         requestResponsesToDelete.add(this.tableModel.getExchangeAt(modelIndex));
       }
       requestResponsesToDelete.forEach(this.tableModel::removeRequestResponse);
-    });
+    };
 
-    var tableSendToRepeater = new JMenuItem("Send to Repeater");
-    tableSendToRepeater.addActionListener(event -> {
+    Runnable tableSendToRepeater = () -> {
       this.commitEditorEdits();
       for (int viewIndex : this.table.getSelectedRows()) {
         var modelIndex = this.table.convertRowIndexToModel(viewIndex);
         var exchange = this.tableModel.getExchangeAt(modelIndex);
         EclipseScoutExtension.api.repeater().sendToRepeater(exchange.request());
       }
-    });
+    };
 
-    var tableSendToIntruder = new JMenuItem("Send to Intruder");
-    tableSendToIntruder.addActionListener(event -> {
+    Runnable tableSendToIntruder = () -> {
       this.commitEditorEdits();
       for (int viewIndex : this.table.getSelectedRows()) {
         var modelIndex = this.table.convertRowIndexToModel(viewIndex);
         var exchange = this.tableModel.getExchangeAt(modelIndex);
         EclipseScoutExtension.api.intruder().sendToIntruder(exchange.request());
       }
-    });
+    };
 
-    var tableSendToOrganizer = new JMenuItem("Send to Organizer");
-    tableSendToOrganizer.addActionListener(event -> {
+    Runnable tableSendToOrganizer = () -> {
       this.commitEditorEdits();
       for (int viewIndex : this.table.getSelectedRows()) {
         var modelIndex = this.table.convertRowIndexToModel(viewIndex);
@@ -163,20 +158,12 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
         EclipseScoutExtension.api.organizer()
             .sendToOrganizer(HttpRequestResponse.httpRequestResponse(request, exchange.response()));
       }
-    });
-
-    var tableContextMenu = new JPopupMenu();
-    tableContextMenu.add(tableSendToRepeater);
-    tableContextMenu.add(tableSendToIntruder);
-    tableContextMenu.add(tableSendToOrganizer);
-    tableContextMenu.addSeparator();
-    tableContextMenu.add(tableDeleteSelectedItems);
+    };
 
     this.table = new JTable(this.tableModel);
     this.table.setDragEnabled(true);
     this.table.setDropMode(DropMode.INSERT_ROWS);
     this.table.setTransferHandler(new EclipseScoutTableRowTransferHandler(this.table, this.tableModel));
-    this.table.setComponentPopupMenu(tableContextMenu);
     this.table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
     this.table.getColumnModel().getColumn(0).setPreferredWidth(50);
     this.table.getColumnModel().getColumn(1).setPreferredWidth(50);
@@ -292,16 +279,13 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     });
 
     this.bindShortcut(this.table, JComponent.WHEN_FOCUSED,
-        KeyStroke.getKeyStroke(KeyEvent.VK_R, InputEvent.CTRL_DOWN_MASK), "sendToRepeater",
-        tableSendToRepeater::doClick);
+        KeyStroke.getKeyStroke(KeyEvent.VK_R, InputEvent.CTRL_DOWN_MASK), "sendToRepeater", tableSendToRepeater);
     this.bindShortcut(this.table, JComponent.WHEN_FOCUSED,
-        KeyStroke.getKeyStroke(KeyEvent.VK_I, InputEvent.CTRL_DOWN_MASK), "sendToIntruder",
-        tableSendToIntruder::doClick);
+        KeyStroke.getKeyStroke(KeyEvent.VK_I, InputEvent.CTRL_DOWN_MASK), "sendToIntruder", tableSendToIntruder);
     this.bindShortcut(this.table, JComponent.WHEN_FOCUSED,
-        KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK), "sendToOrganizer",
-        tableSendToOrganizer::doClick);
+        KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK), "sendToOrganizer", tableSendToOrganizer);
     this.bindShortcut(this.table, JComponent.WHEN_FOCUSED, KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0),
-        "deleteSelectedItems", tableDeleteSelectedItems::doClick);
+        "deleteSelectedItems", tableDeleteSelectedItems);
   }
 
   public Component getComponent() {
