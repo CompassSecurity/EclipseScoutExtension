@@ -9,7 +9,6 @@ import java.awt.KeyboardFocusManager;
 import java.awt.event.ActionEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
-import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -34,6 +33,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
 import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 
 import burp.api.montoya.http.handler.HttpHandler;
 import burp.api.montoya.http.handler.HttpRequestToBeSent;
@@ -211,9 +211,6 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       }
     });
 
-    this.bindTableShortcut(KeyEvent.VK_R, InputEvent.CTRL_DOWN_MASK, "sendToRepeater", tableSendToRepeater::doClick);
-    this.bindTableShortcut(KeyEvent.VK_I, InputEvent.CTRL_DOWN_MASK, "sendToIntruder", tableSendToIntruder::doClick);
-    this.bindTableShortcut(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK, "sendToOrganizer", tableSendToOrganizer::doClick);
     this.bindTableShortcut(KeyEvent.VK_DELETE, 0, "deleteSelectedItems", tableDeleteSelectedItems::doClick);
 
     this.variableTable = new JTable(this.variableTableModel);
@@ -276,11 +273,40 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     this.panel.setLayout(new BorderLayout());
     this.panel.add(upperLower, BorderLayout.CENTER);
     this.panel.addComponentListener(new ComponentAdapter() {
+      /**
+       * Set to the keyCode of a Ctrl+R/I/O we just acted on, so the very next KEY_TYPED event -
+       * the control character AWT synthesizes for that same physical keystroke (e.g. Ctrl+I is
+       * indistinguishable from Tab at the character level) - gets swallowed too, instead of
+       * reaching whichever editor has focus and inserting a stray control character or triggering
+       * focus traversal.
+       */
+      private Integer suppressNextTypedForKeyCode = null;
+
       private KeyEventDispatcher keyEventDispatcher = new KeyEventDispatcher() {
         @Override
         public boolean dispatchKeyEvent(KeyEvent event) {
           try {
             commitEditorEdits();
+
+            if (event.getID() == KeyEvent.KEY_TYPED && suppressNextTypedForKeyCode != null) {
+              suppressNextTypedForKeyCode = null;
+              return true;
+            }
+
+            if (event.getID() == KeyEvent.KEY_PRESSED && event.isControlDown()
+                && isDescendantFocused(panel)) {
+              Runnable action = switch (event.getKeyCode()) {
+                case KeyEvent.VK_R -> tableSendToRepeater::doClick;
+                case KeyEvent.VK_I -> tableSendToIntruder::doClick;
+                case KeyEvent.VK_O -> tableSendToOrganizer::doClick;
+                default -> null;
+              };
+              if (action != null) {
+                action.run();
+                suppressNextTypedForKeyCode = event.getKeyCode();
+                return true;
+              }
+            }
           } catch (Exception exc) {
             EclipseScoutExtension.api.logging().logToError(exc);
           }
@@ -332,6 +358,16 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
           this.responseEditor.getResponse());
       this.tableModel.setRequestResponseAt(modelIndex, editedRequestResponse);
     }
+  }
+
+  /**
+   * Whether the currently focused component is {@code container} itself or one of its
+   * descendants - e.g. whichever of {@link #table}, {@link #requestEditor} or
+   * {@link #responseEditor} the user is actually interacting with.
+   */
+  private static boolean isDescendantFocused(Component container) {
+    var focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+    return focusOwner != null && SwingUtilities.isDescendingFrom(focusOwner, container);
   }
 
   /**
