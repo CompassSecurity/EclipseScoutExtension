@@ -50,7 +50,6 @@ import net.miginfocom.swing.MigLayout;
 
 public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
 
-  private static final String REQUEST_HEADER = "X-Scout-Request";
   private static final String RESPONSE_HEADER = "X-Scout-Response";
 
   private JButton sendSequence;
@@ -142,8 +141,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       for (int viewIndex : this.table.getSelectedRows()) {
         var modelIndex = this.table.convertRowIndexToModel(viewIndex);
         var exchange = this.tableModel.getExchangeAt(modelIndex);
-        var request = exchange.request().withHeader(REQUEST_HEADER, String.valueOf(exchange.nr()));
-        EclipseScoutExtension.api.repeater().sendToRepeater(request);
+        EclipseScoutExtension.api.repeater().sendToRepeater(exchange.request());
       }
     });
 
@@ -153,8 +151,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       for (int viewIndex : this.table.getSelectedRows()) {
         var modelIndex = this.table.convertRowIndexToModel(viewIndex);
         var exchange = this.tableModel.getExchangeAt(modelIndex);
-        var request = exchange.request().withHeader(REQUEST_HEADER, String.valueOf(exchange.nr()));
-        EclipseScoutExtension.api.intruder().sendToIntruder(request);
+        EclipseScoutExtension.api.intruder().sendToIntruder(exchange.request());
       }
     });
 
@@ -164,7 +161,9 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       for (int viewIndex : this.table.getSelectedRows()) {
         var modelIndex = this.table.convertRowIndexToModel(viewIndex);
         var exchange = this.tableModel.getExchangeAt(modelIndex);
-        EclipseScoutExtension.api.organizer().sendToOrganizer(exchange.requestResponse());
+        var request = exchange.request().withRemovedHeader(EclipseScoutExchange.REQUEST_HEADER);
+        EclipseScoutExtension.api.organizer()
+            .sendToOrganizer(HttpRequestResponse.httpRequestResponse(request, exchange.response()));
       }
     });
 
@@ -294,13 +293,13 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       }
     });
 
-    this.bindShortcut(this.panel, JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT,
+    this.bindShortcut(this.table, JComponent.WHEN_FOCUSED,
         KeyStroke.getKeyStroke(KeyEvent.VK_R, InputEvent.CTRL_DOWN_MASK), "sendToRepeater",
         tableSendToRepeater::doClick);
-    this.bindShortcut(this.panel, JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT,
+    this.bindShortcut(this.table, JComponent.WHEN_FOCUSED,
         KeyStroke.getKeyStroke(KeyEvent.VK_I, InputEvent.CTRL_DOWN_MASK), "sendToIntruder",
         tableSendToIntruder::doClick);
-    this.bindShortcut(this.panel, JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT,
+    this.bindShortcut(this.table, JComponent.WHEN_FOCUSED,
         KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK), "sendToOrganizer",
         tableSendToOrganizer::doClick);
     this.bindShortcut(this.table, JComponent.WHEN_FOCUSED, KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0),
@@ -346,11 +345,13 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
    * {@code action} - used to give the table's context-menu items (Send to Repeater/Intruder/
    * Organizer, Delete selected items) keyboard shortcuts without duplicating their logic.
    *
-   * <p>{@link JComponent#WHEN_ANCESTOR_OF_FOCUSED_COMPONENT} on {@link #panel} is what lets
-   * Ctrl+R/I/O fire from inside {@link #requestEditor}/{@link #responseEditor} too, not just from
-   * {@link #table} itself - Swing walks up from the actual focus owner through its ancestors
-   * looking for a matching binding at that condition, unless the focused component (or a closer
-   * ancestor) already claims the same keystroke itself.
+   * <p>Deliberately table-only, not ancestor/window-scoped: Ctrl+R/I are Burp's own built-in
+   * shortcuts on its request/response editor component, which claims them at a level extension
+   * code can't override, so binding these any higher than {@link #table} itself would just be
+   * dead code while the editor has focus. {@link EclipseScoutExchange#REQUEST_HEADER} being baked
+   * into every exchange's request (see {@link EclipseScoutExchange#setNr(int)}) is what makes
+   * Burp's own Ctrl+R/I from the editor still work correctly with this extension's sequence
+   * replay, without needing to intercept the keystroke at all.
    */
   private void bindShortcut(JComponent component, int condition, KeyStroke keyStroke, String name, Runnable action) {
     component.getInputMap(condition).put(keyStroke, name);
@@ -383,12 +384,13 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
   @Override
   public RequestToBeSentAction handleHttpRequestToBeSent(HttpRequestToBeSent requestToBeSent) {
     try {
-      if (requestToBeSent.hasHeader(REQUEST_HEADER)) {
-        var nr = Integer.parseInt(requestToBeSent.headerValue(REQUEST_HEADER));
+      if (requestToBeSent.hasHeader(EclipseScoutExchange.REQUEST_HEADER)) {
+        var nr = Integer.parseInt(requestToBeSent.headerValue(EclipseScoutExchange.REQUEST_HEADER));
         Integer showNr = requestToBeSent.hasHeader(RESPONSE_HEADER)
             ? Integer.parseInt(requestToBeSent.headerValue(RESPONSE_HEADER))
             : null;
-        var request = requestToBeSent.withRemovedHeader(REQUEST_HEADER).withRemovedHeader(RESPONSE_HEADER);
+        var request = requestToBeSent.withRemovedHeader(EclipseScoutExchange.REQUEST_HEADER)
+            .withRemovedHeader(RESPONSE_HEADER);
 
         var sequence = new EclipseScoutSequence(this.getRequestResponesAsDisplayed(), this.variableTableModel.getVariables());
         var targetIndex = sequence.indexOfNr(nr);

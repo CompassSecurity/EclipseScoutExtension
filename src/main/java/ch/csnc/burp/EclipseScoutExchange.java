@@ -23,6 +23,18 @@ import burp.api.montoya.http.message.responses.HttpResponse;
 
 public class EclipseScoutExchange {
 
+  /**
+   * Tags a request with this exchange's {@link #nr()}, so {@link EclipseScoutTab} can recognize
+   * and replay it as part of a sequence no matter how it ends up sent to Repeater/Intruder - via
+   * this extension's own "Send to Repeater"/"Send to Intruder" actions, or via Burp's own
+   * built-in editor shortcut/context-menu action, which extension code can't hook into and would
+   * otherwise send the request untagged. Always stripped again before the request actually goes
+   * out over the wire (see {@code EclipseScoutTab.handleHttpRequestToBeSent}), and deliberately
+   * left off when sending to Organizer (see {@code EclipseScoutTab}'s "Send to Organizer" action)
+   * since those entries are meant as plain reference copies, not replay-sequence members.
+   */
+  static final String REQUEST_HEADER = "X-Scout-Request";
+
   private HttpRequest request;
   private HttpResponse response;
 
@@ -154,6 +166,7 @@ public class EclipseScoutExchange {
 
   public void setNr(int nr) {
     this.nr = nr;
+    this.request = this.request.withHeader(REQUEST_HEADER, String.valueOf(nr));
   }
 
   public void setUiSessionId(String uiSessionId) {
@@ -482,8 +495,17 @@ public class EclipseScoutExchange {
     return cloned;
   }
 
+  /**
+   * Sends this exchange's request directly (not via Repeater/Intruder). {@link #REQUEST_HEADER}
+   * is stripped first: {@code api.http().sendRequest()} is processed by Burp like a request sent
+   * by any tool, including this extension's own registered {@code HttpHandler} - leaving the tag
+   * on would make every programmatic send (e.g. each earlier step {@link EclipseScoutSequence}
+   * replays before reaching the row actually requested) re-enter that handler's sequence-replay
+   * branch instead of just going out over the wire.
+   */
   public void send() {
-    var response = EclipseScoutExtension.api.http().sendRequest(this.request).response();
+    var response = EclipseScoutExtension.api.http().sendRequest(this.request.withRemovedHeader(REQUEST_HEADER))
+        .response();
     this.setResponse(response);
   }
 
