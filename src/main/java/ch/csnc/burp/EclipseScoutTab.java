@@ -6,8 +6,10 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.KeyEventDispatcher;
 import java.awt.KeyboardFocusManager;
+import java.awt.event.ActionEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -20,8 +22,10 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
+import javax.swing.AbstractAction;
 import javax.swing.DropMode;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
@@ -29,6 +33,7 @@ import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
+import javax.swing.KeyStroke;
 
 import burp.api.montoya.http.handler.HttpHandler;
 import burp.api.montoya.http.handler.HttpRequestToBeSent;
@@ -206,6 +211,11 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       }
     });
 
+    this.bindTableShortcut(KeyEvent.VK_R, InputEvent.CTRL_DOWN_MASK, "sendToRepeater", tableSendToRepeater::doClick);
+    this.bindTableShortcut(KeyEvent.VK_I, InputEvent.CTRL_DOWN_MASK, "sendToIntruder", tableSendToIntruder::doClick);
+    this.bindTableShortcut(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK, "sendToOrganizer", tableSendToOrganizer::doClick);
+    this.bindTableShortcut(KeyEvent.VK_DELETE, 0, "deleteSelectedItems", tableDeleteSelectedItems::doClick);
+
     this.variableTable = new JTable(this.variableTableModel);
     this.variableTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
     this.variableTable.getColumnModel().getColumn(0).setPreferredWidth(70);
@@ -322,6 +332,21 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
           this.responseEditor.getResponse());
       this.tableModel.setRequestResponseAt(modelIndex, editedRequestResponse);
     }
+  }
+
+  /**
+   * Binds a keystroke, active while {@link #table} itself has focus, to run {@code action} - used
+   * to give the table's context-menu items (Send to Repeater/Intruder/Organizer, Delete selected
+   * items) keyboard shortcuts without duplicating their logic.
+   */
+  private void bindTableShortcut(int keyCode, int modifiers, String name, Runnable action) {
+    this.table.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke(keyCode, modifiers), name);
+    this.table.getActionMap().put(name, new AbstractAction() {
+      @Override
+      public void actionPerformed(ActionEvent event) {
+        action.run();
+      }
+    });
   }
 
   public void sendSequence() {
