@@ -5,6 +5,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import burp.api.montoya.http.message.requests.HttpRequest;
+
 public class EclipseScoutSequence {
 
   /**
@@ -112,7 +114,21 @@ public class EclipseScoutSequence {
    * available to the very next one.
    */
   public EclipseScoutExchange next() {
+    return this.next(null);
+  }
+
+  /**
+   * Like {@link #next()}, but if {@code liveOverride} is non-null, the exchange's captured
+   * request is replaced with it before the pipeline runs - so a request edited live in
+   * Repeater's or Intruder's pane still gets uiSessionId propagation, sequence renumbering, id
+   * remapping and variable substitution applied on top of the edit, rather than those being
+   * computed against - and then discarded in favor of losing - the original capture.
+   */
+  EclipseScoutExchange next(HttpRequest liveOverride) {
     var exchange = this.exchanges.get(this.position);
+    if (liveOverride != null) {
+      exchange.overrideRequest(liveOverride);
+    }
     if (this.position > 0) {
       var previous = this.exchanges.get(this.position - 1);
       exchange.setUiSessionId(previous.getUiSessionId());
@@ -161,10 +177,20 @@ public class EclipseScoutSequence {
    * that one is expected to be sent by the caller instead.
    */
   public EclipseScoutExchange advanceTo(int index) {
+    return this.advanceTo(index, null);
+  }
+
+  /**
+   * Like {@link #advanceTo(int)}, but the exchange at {@code index} is built from
+   * {@code liveOverride} - a request just edited live in Repeater's or Intruder's pane - instead
+   * of from its own captured request, if {@code liveOverride} is non-null. See
+   * {@link #next(HttpRequest)}.
+   */
+  public EclipseScoutExchange advanceTo(int index, HttpRequest liveOverride) {
     while (this.position < index) {
       this.next().send();
     }
-    return this.next();
+    return this.next(liveOverride);
   }
 
   /**

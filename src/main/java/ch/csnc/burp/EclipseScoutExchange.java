@@ -111,6 +111,16 @@ public class EclipseScoutExchange {
     return this.request;
   }
 
+  /**
+   * Replaces this exchange's request outright, e.g. with one just edited live in Repeater's or
+   * Intruder's request pane, so that {@link EclipseScoutSequence#next()}'s pipeline (uiSessionId
+   * propagation, sequence renumbering, id remapping, variable substitution) applies on top of the
+   * edit instead of the originally captured body.
+   */
+  public void overrideRequest(HttpRequest request) {
+    this.request = request;
+  }
+
   public HttpResponse response() {
     return this.response;
   }

@@ -342,7 +342,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
           EclipseScoutExtension.api.logging().logToError("No row with # %d found, sending as-is".formatted(nr));
           return RequestToBeSentAction.continueWith(request);
         }
-        var targetExchange = sequence.advanceTo(targetIndex);
+        var targetExchange = sequence.advanceTo(targetIndex, request);
         this.sequences.put(requestToBeSent.messageId(), new PendingSequence(sequence, targetExchange, showNr));
         return RequestToBeSentAction.continueWith(targetExchange.request());
       }
