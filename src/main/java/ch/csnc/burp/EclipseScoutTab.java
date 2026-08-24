@@ -133,6 +133,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
 
     var tableSendToRepeater = new JMenuItem("Send to Repeater");
     tableSendToRepeater.addActionListener(event -> {
+      this.commitEditorEdits();
       for (int viewIndex : this.table.getSelectedRows()) {
         var modelIndex = this.table.convertRowIndexToModel(viewIndex);
         var exchange = this.tableModel.getExchangeAt(modelIndex);
@@ -143,6 +144,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
 
     var tableSendToIntruder = new JMenuItem("Send to Intruder");
     tableSendToIntruder.addActionListener(event -> {
+      this.commitEditorEdits();
       for (int viewIndex : this.table.getSelectedRows()) {
         var modelIndex = this.table.convertRowIndexToModel(viewIndex);
         var exchange = this.tableModel.getExchangeAt(modelIndex);
@@ -153,6 +155,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
 
     var tableSendToOrganizer = new JMenuItem("Send to Organizer");
     tableSendToOrganizer.addActionListener(event -> {
+      this.commitEditorEdits();
       for (int viewIndex : this.table.getSelectedRows()) {
         var modelIndex = this.table.convertRowIndexToModel(viewIndex);
         var exchange = this.tableModel.getExchangeAt(modelIndex);
@@ -267,12 +270,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
         @Override
         public boolean dispatchKeyEvent(KeyEvent event) {
           try {
-            if (selectedRow >= 0 && requestEditor.isModified()) {
-              var modelIndex = table.convertRowIndexToModel(selectedRow);
-              var editedRequestResponse = HttpRequestResponse.httpRequestResponse(requestEditor.getRequest(),
-                  responseEditor.getResponse());
-              tableModel.setRequestResponseAt(modelIndex, editedRequestResponse);
-            }
+            commitEditorEdits();
           } catch (Exception exc) {
             EclipseScoutExtension.api.logging().logToError(exc);
           }
@@ -309,7 +307,25 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     return requestResponses;
   }
 
+  /**
+   * Flushes whatever is currently in the request editor for the selected row into the table
+   * model, if it differs from what's stored there. Called before any action that reads the table
+   * model (sending a sequence, or sending a row to Repeater/Intruder/Organizer), since the
+   * editor's own "modified" flag can otherwise go uncommitted - e.g. a paste followed immediately
+   * by clicking a button, with no intervening key event for the old key-driven commit hook to
+   * catch.
+   */
+  private void commitEditorEdits() {
+    if (this.selectedRow >= 0 && this.requestEditor.isModified()) {
+      var modelIndex = this.table.convertRowIndexToModel(this.selectedRow);
+      var editedRequestResponse = HttpRequestResponse.httpRequestResponse(this.requestEditor.getRequest(),
+          this.responseEditor.getResponse());
+      this.tableModel.setRequestResponseAt(modelIndex, editedRequestResponse);
+    }
+  }
+
   public void sendSequence() {
+    this.commitEditorEdits();
     var requestResponses = this.getRequestResponesAsDisplayed();
     var sequence = new EclipseScoutSequence(requestResponses, this.variableTableModel.getVariables());
     while (sequence.hasNext() && !this.cancelRequested) {
