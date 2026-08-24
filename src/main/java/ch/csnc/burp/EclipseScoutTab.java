@@ -25,6 +25,7 @@ import java.util.function.Consumer;
 import javax.swing.AbstractAction;
 import javax.swing.DropMode;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
@@ -112,16 +113,21 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       });
     });
 
-    var setHeader = new JButton("Set header");
-    setHeader.addActionListener(event -> {
+    var updateHeader = new JButton("Update header");
+    updateHeader.addActionListener(event -> {
       var nameField = new JTextField();
       var valueField = new JTextField(20);
+      var removeCheckbox = new JCheckBox("Remove");
+      removeCheckbox.addActionListener(
+          checkboxEvent -> valueField.setEnabled(!removeCheckbox.isSelected()));
       var fields = new JPanel(new MigLayout("wrap 2", "[][grow, fill]"));
       fields.add(new JLabel("Header name:"));
       fields.add(nameField);
       fields.add(new JLabel("Header value:"));
       fields.add(valueField);
-      var result = JOptionPane.showConfirmDialog(this.panel, fields, "Set header", JOptionPane.OK_CANCEL_OPTION);
+      fields.add(new JLabel());
+      fields.add(removeCheckbox);
+      var result = JOptionPane.showConfirmDialog(this.panel, fields, "Update header", JOptionPane.OK_CANCEL_OPTION);
       if (result != JOptionPane.OK_OPTION) {
         return;
       }
@@ -129,9 +135,13 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
       if (name.isEmpty()) {
         return;
       }
-      var value = valueField.getText();
       this.commitEditorEdits();
-      this.tableModel.getExchanges().forEach(exchange -> exchange.setHeader(name, value));
+      if (removeCheckbox.isSelected()) {
+        this.tableModel.getExchanges().forEach(exchange -> exchange.removeHeader(name));
+      } else {
+        var value = valueField.getText();
+        this.tableModel.getExchanges().forEach(exchange -> exchange.setHeader(name, value));
+      }
       this.tableModel.fireTableDataChanged();
       if (this.selectedRow >= 0) {
         var modelIndex = this.table.convertRowIndexToModel(this.selectedRow);
@@ -142,7 +152,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     var actions = new JPanel();
     actions.setLayout(new MigLayout("wrap 1"));
     actions.add(this.sendSequence, "growx");
-    actions.add(setHeader, "growx");
+    actions.add(updateHeader, "growx");
 
     this.tableModel = new EclipseScoutTableModel();
 

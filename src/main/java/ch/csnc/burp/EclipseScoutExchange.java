@@ -186,6 +186,13 @@ public class EclipseScoutExchange {
     this.request = this.request.withHeader(name, value);
   }
 
+  /**
+   * Removes a header from this exchange's request, if present. A no-op if it isn't.
+   */
+  public void removeHeader(String name) {
+    this.request = this.request.withRemovedHeader(name);
+  }
+
   public void setUiSessionId(String uiSessionId) {
     this.uiSessionId = uiSessionId;
     try {
