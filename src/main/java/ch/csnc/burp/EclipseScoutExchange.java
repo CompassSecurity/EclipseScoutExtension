@@ -24,20 +24,21 @@ import burp.api.montoya.http.message.responses.HttpResponse;
 public class EclipseScoutExchange {
 
   /**
-   * Tags a request with this exchange's {@link #nr()}, so {@link EclipseScoutTab} can recognize
-   * and replay it as part of a sequence no matter how it ends up sent to Repeater/Intruder - via
-   * this extension's own "Send to Repeater"/"Send to Intruder" actions, or via Burp's own
-   * built-in editor shortcut/context-menu action, which extension code can't hook into and would
-   * otherwise send the request untagged. Always stripped again before the request actually goes
-   * out over the wire (see {@code EclipseScoutTab.handleHttpRequestToBeSent}), and deliberately
-   * left off when sending to Organizer (see {@code EclipseScoutTab}'s "Send to Organizer" action)
+   * Tags a request with this exchange's {@link #nr()}, so {@link EclipseScoutExtension} can
+   * recognize and replay it as part of a sequence no matter how it ends up sent to
+   * Repeater/Intruder - via this extension's own "Send to Repeater"/"Send to Intruder" actions,
+   * or via Burp's own built-in editor shortcut/context-menu action, which extension code can't
+   * hook into and would otherwise send the request untagged. Always stripped again before the
+   * request actually goes out over the wire (see
+   * {@code EclipseScoutExtension.handleHttpRequestToBeSent}), and deliberately left off when
+   * sending to Organizer (see {@code EclipseScoutExtension}'s "Send to Organizer" action)
    * since those entries are meant as plain reference copies, not replay-sequence members.
    */
   static final String REQUEST_HEADER = "X-Scout-Request";
 
   /**
    * Tags a request sent to Repeater/Intruder with the {@link #nr()} of a different row, telling
-   * {@code EclipseScoutTab.handleHttpResponseReceived} to show that row's response back in the
+   * {@code EclipseScoutExtension.handleHttpResponseReceived} to show that row's response back in the
    * Repeater/Intruder tab once the sequence has replayed far enough to reach it, instead of the
    * response to the request actually sent there. Like {@link #REQUEST_HEADER}, always stripped
    * before the request goes out over the wire.
