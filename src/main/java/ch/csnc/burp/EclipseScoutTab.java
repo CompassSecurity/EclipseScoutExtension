@@ -399,7 +399,31 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     var requestResponses = this.getRequestResponesAsDisplayed();
     var sequence = new EclipseScoutSequence(requestResponses, this.variableTableModel.getVariables());
     while (sequence.hasNext() && !this.cancelRequested) {
-      sequence.next().send();
+      var exchange = sequence.next();
+      exchange.send();
+      this.updateRowResponse(exchange);
+    }
+  }
+
+  /**
+   * Writes {@code exchange}'s current response back onto the table row sharing its static "#",
+   * so the sequence table reflects what a replay actually returned, and refreshes the response
+   * editor too if that row happens to be the selected one - otherwise it keeps showing whatever
+   * was in it before the replay until the row is reselected. Deliberately leaves the row's own
+   * captured request untouched - {@link EclipseScoutSequence} clones exchanges before replaying
+   * them precisely so each run starts from the pristine originally-captured request, which its
+   * id remapping and renumbering depend on.
+   */
+  private void updateRowResponse(EclipseScoutExchange exchange) {
+    if (exchange.nr() == null) {
+      return;
+    }
+    this.tableModel.setResponseForNr(exchange.nr(), exchange.response());
+    if (this.selectedRow >= 0) {
+      var modelIndex = this.table.convertRowIndexToModel(this.selectedRow);
+      if (exchange.nr().equals(this.tableModel.getExchangeAt(modelIndex).nr())) {
+        this.responseEditor.setResponse(exchange.response());
+      }
     }
   }
 
@@ -444,12 +468,15 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     var pending = this.sequences.remove(responseReceived.messageId());
     if (pending != null) {
       pending.targetExchange().setResponse(responseReceived);
+      this.updateRowResponse(pending.targetExchange());
       this.cancelRequested = false;
       this.sequenceRunning = true;
       this.sendSequence.setText("Cancel sequence");
       try {
         while (pending.sequence().hasNext() && !this.cancelRequested) {
-          pending.sequence().next().send();
+          var exchange = pending.sequence().next();
+          exchange.send();
+          this.updateRowResponse(exchange);
         }
       } finally {
         this.sequenceRunning = false;

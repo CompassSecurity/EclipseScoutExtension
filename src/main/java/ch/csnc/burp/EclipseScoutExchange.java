@@ -148,6 +148,11 @@ public class EclipseScoutExchange {
 
   public void setResponse(HttpResponse response) {
     this.response = response;
+    if (response == null) {
+      // e.g. the request failed at the network level (connection refused/timeout/host down) and
+      // Burp couldn't produce a response - nothing to extract a uiSessionId from.
+      return;
+    }
     try {
       var jsonObj = new JSONObject(jsonBody(response));
       var startupData = jsonObj.getJSONObject("startupData");
