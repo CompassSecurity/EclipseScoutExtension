@@ -8,8 +8,10 @@ import javax.swing.JComponent;
 import javax.swing.JTable;
 import javax.swing.TransferHandler;
 
-
-
+/**
+ * Enables drag-and-drop row reordering on the sequence table: dragging a row records its model
+ * index, and dropping it elsewhere moves that row to the target index in the underlying model.
+ */
 public class EclipseScoutTableRowTransferHandler extends TransferHandler {
 
     private final JTable table;
@@ -23,11 +25,13 @@ public class EclipseScoutTableRowTransferHandler extends TransferHandler {
 
     @Override
     protected Transferable createTransferable(JComponent c) {
-        int viewRow = table.getSelectedRow();
+        var viewRow = table.getSelectedRow();
         if (viewRow < 0) {
             return null;
         }
         draggedModelRow = table.convertRowIndexToModel(viewRow);
+        // The dragged row's model index is the only thing importData() needs to complete the
+        // move; the transferable's payload itself is otherwise unused.
         return new StringSelection(String.valueOf(draggedModelRow));
     }
 
@@ -46,9 +50,9 @@ public class EclipseScoutTableRowTransferHandler extends TransferHandler {
         if (!canImport(support)) {
             return false;
         }
-        JTable.DropLocation dl = (JTable.DropLocation) support.getDropLocation();
-        int viewTargetRow = dl.getRow();
-        int modelTargetRow = table.convertRowIndexToModel(viewTargetRow);
+        var dl = (JTable.DropLocation) support.getDropLocation();
+        var viewTargetRow = dl.getRow();
+        var modelTargetRow = table.convertRowIndexToModel(viewTargetRow);
         // Account for removing the original row first
         if (draggedModelRow < modelTargetRow) {
             modelTargetRow--;

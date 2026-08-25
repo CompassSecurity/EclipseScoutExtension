@@ -8,6 +8,10 @@ import javax.swing.table.AbstractTableModel;
 
 import burp.api.montoya.http.message.HttpRequestResponse;
 
+/**
+ * Backs the main sequence table: one row per captured exchange, in display order, showing its
+ * static "#", the "#" captured in its request/response bodies, and basic request info.
+ */
 public class EclipseScoutTableModel extends AbstractTableModel {
 
   private String[] columnNames = new String[] { "#", "Req#", "Res#", "Method", "Host", "Path" };
@@ -53,6 +57,7 @@ public class EclipseScoutTableModel extends AbstractTableModel {
     }
   }
 
+  /** Reorders rows to reflect a drag-and-drop move, e.g. via {@link EclipseScoutTableRowTransferHandler}. */
   public void moveRow(int from, int to) {
     if (from == to) {
       return;
@@ -62,6 +67,7 @@ public class EclipseScoutTableModel extends AbstractTableModel {
     this.fireTableDataChanged();
   }
 
+  /** Sorts rows by the "#", "Req#" or "Res#" column; clicking any other column header is a no-op. */
   public void sortByColumn(int column) {
     switch (column) {
       case 0:

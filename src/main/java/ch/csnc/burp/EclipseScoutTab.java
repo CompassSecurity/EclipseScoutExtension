@@ -65,9 +65,16 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
   private volatile boolean sequenceRunning = false;
   private volatile boolean cancelRequested = false;
 
+  /**
+   * A replay in progress that was kicked off from {@link #handleHttpRequestToBeSent}: the
+   * sequence to keep replaying, the exchange whose response is still outstanding, and, if the
+   * originating request was tagged with {@link EclipseScoutExchange#RESPONSE_HEADER}, the "#" of
+   * the row whose response should be shown back to the caller once replay completes.
+   */
   private record PendingSequence(EclipseScoutSequence sequence, EclipseScoutExchange targetExchange, Integer showNr) {
   }
 
+  /** Pending sequence replays, keyed by the Burp message id of their outstanding request. */
   private Map<Integer, PendingSequence> sequences = new HashMap<>();
 
   public EclipseScoutTab() {
@@ -222,15 +229,17 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
         }
       }
     });
+    // Clicking a column header sorts the table by that column instead of the usual Swing
+    // header-drag-to-reorder-columns behavior.
     this.table.getTableHeader().addMouseListener(new MouseAdapter() {
       @Override
       public void mouseClicked(MouseEvent e) {
-        int viewColumn = table.columnAtPoint(e.getPoint());
+        var viewColumn = table.columnAtPoint(e.getPoint());
         if (viewColumn < 0) {
           return;
         }
-        int modelColumn = table.convertColumnIndexToModel(viewColumn);
-        EclipseScoutTableModel model = (EclipseScoutTableModel) table.getModel();
+        var modelColumn = table.convertColumnIndexToModel(viewColumn);
+        var model = (EclipseScoutTableModel) table.getModel();
         model.sortByColumn(modelColumn);
       }
     });
@@ -408,7 +417,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     try {
       if (requestToBeSent.hasHeader(EclipseScoutExchange.REQUEST_HEADER)) {
         var nr = Integer.parseInt(requestToBeSent.headerValue(EclipseScoutExchange.REQUEST_HEADER));
-        Integer showNr = requestToBeSent.hasHeader(EclipseScoutExchange.RESPONSE_HEADER)
+        var showNr = requestToBeSent.hasHeader(EclipseScoutExchange.RESPONSE_HEADER)
             ? Integer.parseInt(requestToBeSent.headerValue(EclipseScoutExchange.RESPONSE_HEADER))
             : null;
         var request = requestToBeSent.withRemovedHeader(EclipseScoutExchange.REQUEST_HEADER)

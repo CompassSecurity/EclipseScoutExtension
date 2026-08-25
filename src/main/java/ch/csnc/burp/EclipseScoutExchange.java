@@ -509,7 +509,7 @@ public class EclipseScoutExchange {
   }
 
   public EclipseScoutExchange clone() {
-    HttpRequest clonedRequest = HttpRequest.httpRequest(this.request.httpService(), this.request.toByteArray());
+    var clonedRequest = HttpRequest.httpRequest(this.request.httpService(), this.request.toByteArray());
     HttpResponse clonedResponse = null;
     if (this.response != null) {
       clonedResponse = HttpResponse.httpResponse(this.response.toByteArray());
