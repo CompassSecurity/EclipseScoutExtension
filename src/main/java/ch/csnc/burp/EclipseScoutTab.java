@@ -157,7 +157,7 @@ public class EclipseScoutTab implements ContextMenuItemsProvider, HttpHandler {
     });
 
     var actions = new JPanel();
-    actions.setLayout(new MigLayout("wrap 1"));
+    actions.setLayout(new MigLayout("wrap 1", "[160!]"));
     actions.add(this.sendSequence, "growx");
     actions.add(updateHeader, "growx");
 
