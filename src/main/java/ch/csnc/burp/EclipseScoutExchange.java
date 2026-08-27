@@ -18,6 +18,7 @@ import burp.api.montoya.core.ByteArray;
 import burp.api.montoya.http.message.ContentType;
 import burp.api.montoya.http.message.HttpMessage;
 import burp.api.montoya.http.message.HttpRequestResponse;
+import burp.api.montoya.http.message.MimeType;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
 
@@ -123,26 +124,28 @@ public class EclipseScoutExchange {
       this.response = HttpResponse.httpResponse(requestResponse.response().toByteArray());
     }
 
+    // Checked independently per message - a request/response pair's Content-Type isn't
+    // symmetric (e.g. a plain GET with no body can still get a JSON response), so gating the
+    // response-side extraction on the request's Content-Type would silently miss it.
     if (this.request.contentType() == ContentType.JSON) {
       try {
-        {
-          var body = jsonBody(this.request).strip();
-          if (body.startsWith("{")) {
-            var jsonObj = new JSONObject(body);
-            this.sequenceNrRequest = jsonObj.has("#") ? jsonObj.getInt("#") : null;
-          }
-        }
-        {
-          if (this.response != null) {
-            var body = jsonBody(this.response).strip();
-            if (body.startsWith("{")) {
-              var jsonObj = new JSONObject(body);
-              this.sequenceNrResponse = jsonObj.has("#") ? jsonObj.getInt("#") : null;
-            }
-          }
+        var body = jsonBody(this.request).strip();
+        if (body.startsWith("{")) {
+          var jsonObj = new JSONObject(body);
+          this.sequenceNrRequest = jsonObj.has("#") ? jsonObj.getInt("#") : null;
         }
       } catch (JSONException exc) {
         this.sequenceNrRequest = null;
+      }
+    }
+    if (this.response != null && this.response.mimeType() == MimeType.JSON) {
+      try {
+        var body = jsonBody(this.response).strip();
+        if (body.startsWith("{")) {
+          var jsonObj = new JSONObject(body);
+          this.sequenceNrResponse = jsonObj.has("#") ? jsonObj.getInt("#") : null;
+        }
+      } catch (JSONException exc) {
         this.sequenceNrResponse = null;
       }
     }
