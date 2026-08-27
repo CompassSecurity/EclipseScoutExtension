@@ -4,6 +4,7 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.Insets;
 import java.awt.KeyEventDispatcher;
 import java.awt.KeyboardFocusManager;
 import java.awt.event.ActionEvent;
@@ -39,6 +40,7 @@ import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
+import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.KeyStroke;
@@ -76,6 +78,8 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
   private HttpRequestEditor requestEditor;
   private HttpResponseEditor responseEditor;
   private JPanel panel;
+  private JTabbedPane tabs;
+  private int runTabCount = 0;
 
   private int selectedRow = -1;
   private volatile boolean sequenceRunning = false;
@@ -146,10 +150,12 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
       this.cancelRequested = false;
       this.sequenceRunning = true;
       this.sendSequence.setText("Cancel sequence");
+      var updateRunTab = this.openRunTab();
       CompletableFuture.runAsync(() -> {
         try {
           logStatus.accept("sending sequence");
-          this.sendSequence();
+          this.sendSequence(
+              (sequence, exchange, index) -> updateRunTab.accept(sequence.exchanges().subList(0, index + 1)));
           logStatus.accept(this.cancelRequested ? "cancelled" : "done");
         } catch (Exception exc) {
           EclipseScoutExtension.api.logging().logToError(exc);
@@ -353,9 +359,12 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
 
     var upperLower = new JSplitPane(JSplitPane.VERTICAL_SPLIT, upper, lower);
 
+    this.tabs = new JTabbedPane();
+    this.tabs.addTab("Sequence", upperLower);
+
     this.panel = new JPanel();
     this.panel.setLayout(new BorderLayout());
-    this.panel.add(upperLower, BorderLayout.CENTER);
+    this.panel.add(this.tabs, BorderLayout.CENTER);
     this.panel.addComponentListener(new ComponentAdapter() {
       private KeyEventDispatcher keyEventDispatcher = new KeyEventDispatcher() {
         @Override
@@ -388,6 +397,74 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
         KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK), "sendToOrganizer", tableSendToOrganizer);
     this.bindShortcut(this.table, JComponent.WHEN_FOCUSED, KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0),
         "deleteSelectedItems", tableDeleteSelectedItems);
+  }
+
+  /**
+   * Opens a new closable tab showing a live, read-only view of one "Send sequence" run - a table
+   * of every exchange in that run in send order, with its own request/response editor pair
+   * mirroring the selected row - and selects it. Kept entirely separate from the always-editable
+   * "Sequence" tab, so the original captured rows stay inspectable and editable while a run is
+   * in progress or after it's finished. Returns a callback the caller should invoke - from any
+   * thread - with the run's exchanges as they progress; each call refreshes the tab's table on
+   * the EDT while preserving its current row selection, so watching a row fill in with its
+   * response doesn't get knocked back to "nothing selected" on every step.
+   */
+  private Consumer<List<EclipseScoutExchange>> openRunTab() {
+    var runTableModel = new EclipseScoutTableModel();
+    var runTable = new JTable(runTableModel);
+    runTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+    runTable.getColumnModel().getColumn(0).setPreferredWidth(50);
+    runTable.getColumnModel().getColumn(1).setPreferredWidth(50);
+    runTable.getColumnModel().getColumn(2).setPreferredWidth(50);
+    runTable.getColumnModel().getColumn(3).setPreferredWidth(100);
+    runTable.getColumnModel().getColumn(4).setPreferredWidth(200);
+    runTable.getColumnModel().getColumn(5).setPreferredWidth(400);
+
+    var runRequestEditor = EclipseScoutExtension.api.userInterface().createHttpRequestEditor(EditorOptions.READ_ONLY);
+    var runResponseEditor = EclipseScoutExtension.api.userInterface().createHttpResponseEditor(EditorOptions.READ_ONLY);
+    runTable.getSelectionModel().addListSelectionListener(event -> {
+      if (!event.getValueIsAdjusting() && runTable.getSelectedRow() >= 0) {
+        var modelIndex = runTable.convertRowIndexToModel(runTable.getSelectedRow());
+        var exchange = runTableModel.getExchangeAt(modelIndex);
+        runRequestEditor.setRequest(exchange.request());
+        runResponseEditor.setResponse(exchange.response());
+      }
+    });
+
+    var runLower = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, runRequestEditor.uiComponent(),
+        runResponseEditor.uiComponent());
+    runLower.setResizeWeight(0.5);
+    var runSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, new JScrollPane(runTable), runLower);
+
+    var title = "Run " + ++this.runTabCount;
+    this.tabs.addTab(title, runSplit);
+    this.tabs.setTabComponentAt(this.tabs.indexOfComponent(runSplit), this.closableTabHeader(title, runSplit));
+    this.tabs.setSelectedComponent(runSplit);
+
+    return exchanges -> SwingUtilities.invokeLater(() -> {
+      var selectedModelIndex = runTable.getSelectedRow() >= 0
+          ? runTable.convertRowIndexToModel(runTable.getSelectedRow())
+          : -1;
+      runTableModel.setExchanges(exchanges);
+      if (selectedModelIndex >= 0 && selectedModelIndex < runTableModel.getRowCount()) {
+        runTable.setRowSelectionInterval(selectedModelIndex, selectedModelIndex);
+      }
+    });
+  }
+
+  /** A tab header showing {@code title} plus a small "x" button that removes {@code content}'s tab from {@link #tabs}. */
+  private JComponent closableTabHeader(String title, Component content) {
+    var header = new JPanel(new MigLayout("insets 0, gap 4"));
+    header.setOpaque(false);
+    header.add(new JLabel(title));
+    var close = new JButton("x");
+    close.setMargin(new Insets(0, 4, 0, 4));
+    close.setFocusable(false);
+    close.setBorderPainted(false);
+    close.setContentAreaFilled(false);
+    close.addActionListener(event -> this.tabs.remove(content));
+    header.add(close);
+    return header;
   }
 
   /** This extension's suite tab component, as registered in {@link #initialize}. */
@@ -459,14 +536,17 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
 
   /**
    * Replays every displayed row in order, from the start, sending each one directly; stops early
-   * if {@link #cancelRequested} is set between steps.
+   * if {@link #cancelRequested} is set between steps. {@code stepListener}, if non-null, is
+   * notified after each step - e.g. to drive a live view of the run in progress - and is called
+   * on this method's own (background) thread, not the EDT.
    */
-  public void sendSequence() {
+  public void sendSequence(EclipseScoutSequence.StepListener stepListener) {
     this.commitEditorEdits();
     var requestResponses = this.getRequestResponesAsDisplayed();
     var sequence = new EclipseScoutSequence(requestResponses, this.variableTableModel.getVariables());
+    sequence.setStepListener(stepListener);
     while (sequence.hasNext() && !this.cancelRequested) {
-      sequence.next().send();
+      sequence.sendNext();
     }
   }
 
@@ -608,7 +688,7 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
       this.sendSequence.setText("Cancel sequence");
       try {
         while (pending.sequence().hasNext() && !this.cancelRequested) {
-          pending.sequence().next().send();
+          pending.sequence().sendNext();
         }
       } finally {
         this.sequenceRunning = false;

@@ -68,11 +68,22 @@ public class EclipseScoutSequence {
     }
   }
 
+  /**
+   * Notified, in send order, each time {@link #sendNext()} finishes sending one exchange -
+   * {@code sequence} is {@code this}, so a listener can read {@link #exchanges()} for a full
+   * snapshot of the run so far, not just the exchange that just completed.
+   */
+  public interface StepListener {
+    void onStep(EclipseScoutSequence sequence, EclipseScoutExchange exchange, int index);
+  }
+
   private int position = 0;
 
   private List<EclipseScoutExchange> exchanges;
 
   private final List<EclipseScoutVariable> variableDefinitions;
+
+  private StepListener stepListener;
 
   /**
    * Current value of each variable, as most recently extracted from a response during this
@@ -113,6 +124,36 @@ public class EclipseScoutSequence {
   /** Whether {@link #next()} has another exchange left to return in this replay run. */
   public boolean hasNext() {
     return this.position < this.exchanges.size();
+  }
+
+  /**
+   * Registers {@code listener} to be notified after each exchange {@link #sendNext()} sends,
+   * e.g. to drive a live view of a run in progress. Replaces any previously set listener;
+   * {@code null} stops notifying.
+   */
+  public void setStepListener(StepListener listener) {
+    this.stepListener = listener;
+  }
+
+  /**
+   * Every exchange in this run, in display order - the live backing list, not a copy, so its
+   * clones reflect whatever has been sent/received so far as the run progresses.
+   */
+  public List<EclipseScoutExchange> exchanges() {
+    return this.exchanges;
+  }
+
+  /**
+   * Combines {@link #next()} and {@link EclipseScoutExchange#send()}, notifying the
+   * {@link #setStepListener registered step listener}, if any, once the response is in.
+   */
+  public EclipseScoutExchange sendNext() {
+    var exchange = this.next();
+    exchange.send();
+    if (this.stepListener != null) {
+      this.stepListener.onStep(this, exchange, this.position - 1);
+    }
+    return exchange;
   }
 
   /**
@@ -215,7 +256,7 @@ public class EclipseScoutSequence {
    */
   public EclipseScoutExchange advanceTo(int index, HttpRequest liveOverride) {
     while (this.position < index) {
-      this.next().send();
+      this.sendNext();
     }
     return this.next(liveOverride);
   }
