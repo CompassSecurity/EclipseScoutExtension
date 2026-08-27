@@ -16,7 +16,7 @@ import javax.swing.table.AbstractTableModel;
  */
 public class EclipseScoutVariableTableModel extends AbstractTableModel {
 
-  private final String[] columnNames = new String[] { "Exchange #", "Name", "Regex", "Preview" };
+  private final String[] columnNames = new String[] { "#", "Name", "Regex", "Preview" };
   private final List<EclipseScoutVariable> variables = new ArrayList<>();
   private final Function<Integer, EclipseScoutExchange> exchangeByNr;
 
