@@ -243,15 +243,7 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     close.setFocusable(false);
     close.setBorderPainted(false);
     close.setContentAreaFilled(false);
-    close.addActionListener(event -> {
-      var confirmed = JOptionPane.showConfirmDialog(EclipseScoutExtension.this.panel,
-          "Remove sequence \"%s\" and its %d row(s)? This cannot be undone."
-              .formatted(tab.getName(), tab.getTableModel().getRowCount()),
-          "Remove sequence", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-      if (confirmed == JOptionPane.YES_OPTION) {
-        this.removeSequenceTab(tab);
-      }
-    });
+    close.addActionListener(event -> this.removeSequenceTab(tab));
 
     var header = new JPanel(new MigLayout("insets 0, gap 4"));
     header.setOpaque(false);
