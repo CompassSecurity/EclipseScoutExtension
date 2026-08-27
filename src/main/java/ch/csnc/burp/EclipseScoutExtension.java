@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
@@ -31,6 +32,7 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -48,8 +50,10 @@ import burp.api.montoya.http.handler.HttpResponseReceived;
 import burp.api.montoya.http.handler.RequestToBeSentAction;
 import burp.api.montoya.http.handler.ResponseReceivedAction;
 import burp.api.montoya.http.message.HttpRequestResponse;
+import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.ui.contextmenu.ContextMenuEvent;
 import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
+import burp.api.montoya.ui.contextmenu.MessageEditorHttpRequestResponse;
 import burp.api.montoya.ui.editor.EditorOptions;
 import burp.api.montoya.ui.editor.HttpRequestEditor;
 import burp.api.montoya.ui.editor.HttpResponseEditor;
@@ -448,14 +452,60 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     }
   }
 
-  /** Adds a "Send to Eclipse Scout" item that copies the selected request/response(s) into the sequence table. */
+  /**
+   * Adds a "Send to Eclipse Scout" item that copies the selected request/response(s) into the
+   * sequence table, plus, when invoked from within a request editor pane (any of them, not just
+   * this extension's own), a "Variables" submenu that inserts a {@code $VAR:name$} placeholder
+   * for a declared variable at the current cursor position.
+   */
   @Override
   public List<Component> provideMenuItems(ContextMenuEvent event) {
+    var items = new ArrayList<Component>();
+
     var sendTo = new JMenuItem("Send to %s".formatted(EclipseScoutExtension.NAME));
     sendTo.addActionListener((actionEvent) -> {
       event.selectedRequestResponses().forEach(this::addRequestResponse);
     });
-    return List.of(sendTo);
+    items.add(sendTo);
+
+    event.messageEditorRequestResponse()
+        .filter(editor -> editor.selectionContext() == MessageEditorHttpRequestResponse.SelectionContext.REQUEST)
+        .flatMap(this::buildVariablesMenu)
+        .ifPresent(items::add);
+
+    return items;
+  }
+
+  /**
+   * Builds a "Variables" submenu listing every declared variable with a non-blank name, or
+   * {@link Optional#empty()} if none are declared. Selecting an entry inserts a
+   * {@code $VAR:name$} placeholder into {@code editor}'s request at its current cursor position.
+   */
+  private Optional<JMenu> buildVariablesMenu(MessageEditorHttpRequestResponse editor) {
+    var names = this.variableTableModel.getVariables().stream()
+        .map(EclipseScoutVariable::name)
+        .filter(name -> name != null && !name.isBlank())
+        .distinct()
+        .toList();
+    if (names.isEmpty()) {
+      return Optional.empty();
+    }
+    var menu = new JMenu("Variables");
+    for (var name : names) {
+      var item = new JMenuItem(name);
+      item.addActionListener(actionEvent -> this.insertVariablePlaceholder(editor, name));
+      menu.add(item);
+    }
+    return Optional.of(menu);
+  }
+
+  /** Inserts a {@code $VAR:name$} placeholder into {@code editor}'s request at its current cursor position. */
+  private void insertVariablePlaceholder(MessageEditorHttpRequestResponse editor, String name) {
+    var request = editor.requestResponse().request();
+    var text = request.toString();
+    var caret = editor.caretPosition();
+    var updated = text.substring(0, caret) + "$VAR:" + name + "$" + text.substring(caret);
+    editor.setRequest(HttpRequest.httpRequest(request.httpService(), updated));
   }
 
   /**
