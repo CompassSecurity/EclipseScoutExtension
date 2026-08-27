@@ -1,5 +1,6 @@
 package ch.csnc.burp;
 
+import java.awt.AWTEvent;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -7,6 +8,8 @@ import java.awt.Dimension;
 import java.awt.Insets;
 import java.awt.KeyEventDispatcher;
 import java.awt.KeyboardFocusManager;
+import java.awt.Toolkit;
+import java.awt.event.AWTEventListener;
 import java.awt.event.ActionEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
@@ -28,6 +31,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 import javax.swing.AbstractAction;
+import javax.swing.DefaultCellEditor;
 import javax.swing.DropMode;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -305,10 +309,23 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
 
     this.variableTable = new JTable(this.variableTableModel);
     this.variableTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+    // Without this, JTable's default behavior on losing focus to some other component (rather
+    // than moving to a different cell in the same table) is to leave the in-progress edit
+    // uncommitted instead of saving it - e.g. clicking "Send sequence" right after editing a
+    // regex would silently drop that edit.
+    this.variableTable.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
     this.variableTable.getColumnModel().getColumn(0).setPreferredWidth(70);
     this.variableTable.getColumnModel().getColumn(1).setPreferredWidth(100);
     this.variableTable.getColumnModel().getColumn(2).setPreferredWidth(150);
     this.variableTable.getColumnModel().getColumn(3).setPreferredWidth(150);
+
+    var regexField = new JTextField();
+    var regexPatternsMenu = new JMenu("Patterns");
+    regexPatternsMenu.add(menuItem("([^\"]+)", () -> regexField.replaceSelection("([^\"]+)")));
+    var regexPopup = new JPopupMenu();
+    regexPopup.add(regexPatternsMenu);
+    regexField.setComponentPopupMenu(regexPopup);
+    this.variableTable.getColumnModel().getColumn(2).setCellEditor(new DefaultCellEditor(regexField));
     this.variableTable.setPreferredScrollableViewportSize(
         new Dimension(this.variableTable.getPreferredScrollableViewportSize().width,
             this.variableTable.getRowHeight() * 5));
@@ -378,14 +395,33 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
         }
       };
 
+      // Commits an in-progress variables-table cell edit as soon as a mouse press lands
+      // anywhere outside that table (and outside its own "Patterns" popup, so picking a pattern
+      // still works) - JTable's own focus-based commit-on-blur doesn't reliably fire for clicks
+      // that land in Burp's own UI outside this extension's panel.
+      private AWTEventListener mouseEventListener = event -> {
+        if (event instanceof MouseEvent mouseEvent && mouseEvent.getID() == MouseEvent.MOUSE_PRESSED
+            && mouseEvent.getSource() instanceof Component source
+            && !SwingUtilities.isDescendingFrom(source, EclipseScoutExtension.this.variableTable)
+            && SwingUtilities.getAncestorOfClass(JPopupMenu.class, source) == null) {
+          try {
+            EclipseScoutExtension.this.commitVariableTableEdits();
+          } catch (Exception exc) {
+            EclipseScoutExtension.api.logging().logToError(exc);
+          }
+        }
+      };
+
       @Override
       public void componentShown(ComponentEvent event) {
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(this.keyEventDispatcher);
+        Toolkit.getDefaultToolkit().addAWTEventListener(this.mouseEventListener, AWTEvent.MOUSE_EVENT_MASK);
       }
 
       @Override
       public void componentHidden(ComponentEvent event) {
         KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(this.keyEventDispatcher);
+        Toolkit.getDefaultToolkit().removeAWTEventListener(this.mouseEventListener);
       }
     });
 
@@ -501,6 +537,21 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
       var editedRequestResponse = HttpRequestResponse.httpRequestResponse(this.requestEditor.getRequest(),
           this.responseEditor.getResponse());
       this.tableModel.setRequestResponseAt(modelIndex, editedRequestResponse);
+    }
+  }
+
+  /**
+   * Stops whatever cell is currently being edited in the variables table, committing its value
+   * into the model - a plain {@code JTable} only does this on its own when focus moves to
+   * another cell in the same table; moving focus to some other component entirely (e.g. clicking
+   * "Send sequence" right after typing a regex) otherwise leaves the edit sitting uncommitted in
+   * the editor component. Called from the global key/mouse hooks installed in {@link #buildUi}
+   * so a keystroke or a click anywhere outside the table (and outside its own "Patterns" popup)
+   * commits whatever cell is open.
+   */
+  private void commitVariableTableEdits() {
+    if (this.variableTable.isEditing()) {
+      this.variableTable.getCellEditor().stopCellEditing();
     }
   }
 
