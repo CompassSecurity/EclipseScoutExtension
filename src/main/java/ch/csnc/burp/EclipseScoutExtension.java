@@ -531,7 +531,10 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
 
   /**
    * Inserts a {@code $VAR:name$} placeholder into {@link #requestEditor}, replacing its current
-   * selection if it has one, or inserting at the cursor position otherwise.
+   * selection if it has one, or inserting at the cursor position otherwise, and writes the result
+   * straight into the table model - a programmatic {@link HttpRequestEditor#setRequest} doesn't
+   * set the editor's "modified" flag, so leaving this to the usual {@link #commitEditorEdits}
+   * path would silently drop the inserted placeholder once the row is no longer selected.
    */
   private void insertVariablePlaceholder(String name) {
     var request = this.requestEditor.getRequest();
@@ -541,7 +544,14 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
         .orElseGet(() -> Range.range(this.requestEditor.caretPosition(), this.requestEditor.caretPosition()));
     var updated = text.substring(0, range.startIndexInclusive()) + "$VAR:" + name + "$"
         + text.substring(range.endIndexExclusive());
-    this.requestEditor.setRequest(HttpRequest.httpRequest(request.httpService(), updated));
+    var updatedRequest = HttpRequest.httpRequest(request.httpService(), updated);
+    this.requestEditor.setRequest(updatedRequest);
+    if (this.selectedRow >= 0) {
+      var modelIndex = this.table.convertRowIndexToModel(this.selectedRow);
+      var editedRequestResponse = HttpRequestResponse.httpRequestResponse(updatedRequest,
+          this.responseEditor.getResponse());
+      this.tableModel.setRequestResponseAt(modelIndex, editedRequestResponse);
+    }
   }
 
   /**
