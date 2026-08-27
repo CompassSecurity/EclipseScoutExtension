@@ -45,6 +45,16 @@ public class EclipseScoutExchange {
    */
   static final String RESPONSE_HEADER = "X-Scout-Response";
 
+  /**
+   * Tags a request with the name of the {@code EclipseScoutSequenceTab} it belongs to, so
+   * {@code EclipseScoutExtension.handleHttpRequestToBeSent} knows which sequence's rows/variables
+   * to replay against when the request comes back tagged with {@link #REQUEST_HEADER} - needed
+   * now that more than one sequence can exist, so a bare "#" is no longer enough to find the row.
+   * Like {@link #REQUEST_HEADER}, always stripped again before the request actually goes out over
+   * the wire.
+   */
+  static final String SEQUENCE_HEADER = "X-Scout-Sequence";
+
   private HttpRequest request;
   private HttpResponse response;
 
@@ -203,6 +213,11 @@ public class EclipseScoutExchange {
   public void setNr(int nr) {
     this.nr = nr;
     this.request = this.request.withHeader(REQUEST_HEADER, String.valueOf(nr));
+  }
+
+  /** Tags this exchange's request with the name of the sequence it belongs to - see {@link #SEQUENCE_HEADER}. */
+  public void setSequenceName(String sequenceName) {
+    this.request = this.request.withHeader(SEQUENCE_HEADER, sequenceName);
   }
 
   /**
@@ -563,14 +578,16 @@ public class EclipseScoutExchange {
 
   /**
    * Sends this exchange's request directly (not via Repeater/Intruder). {@link #REQUEST_HEADER}
-   * is stripped first: {@code api.http().sendRequest()} is processed by Burp like a request sent
-   * by any tool, including this extension's own registered {@code HttpHandler} - leaving the tag
-   * on would make every programmatic send (e.g. each earlier step {@link EclipseScoutSequence}
-   * replays before reaching the row actually requested) re-enter that handler's sequence-replay
-   * branch instead of just going out over the wire.
+   * and {@link #SEQUENCE_HEADER} are stripped first: {@code api.http().sendRequest()} is
+   * processed by Burp like a request sent by any tool, including this extension's own registered
+   * {@code HttpHandler} - leaving {@link #REQUEST_HEADER} on would make every programmatic send
+   * (e.g. each earlier step {@link EclipseScoutSequence} replays before reaching the row actually
+   * requested) re-enter that handler's sequence-replay branch instead of just going out over the
+   * wire; {@link #SEQUENCE_HEADER} is only ever meaningful alongside it, so it's stripped too.
    */
   public void send() {
-    var response = EclipseScoutExtension.api.http().sendRequest(this.request.withRemovedHeader(REQUEST_HEADER))
+    var response = EclipseScoutExtension.api.http()
+        .sendRequest(this.request.withRemovedHeader(REQUEST_HEADER).withRemovedHeader(SEQUENCE_HEADER))
         .response();
     this.setResponse(response);
   }

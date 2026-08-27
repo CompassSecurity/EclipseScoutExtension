@@ -133,6 +133,13 @@ public class EclipseScoutVariableTableModel extends AbstractTableModel {
     return this.variables;
   }
 
+  /** Replaces all rows with {@code variables}, e.g. when restoring previously persisted state. */
+  public void setVariables(List<EclipseScoutVariable> variables) {
+    this.variables.clear();
+    this.variables.addAll(variables);
+    this.fireTableDataChanged();
+  }
+
   /** Recomputes and redisplays every row's "Preview" column, e.g. after a sequence replay updates a response. */
   public void refreshPreview() {
     this.fireTableDataChanged();

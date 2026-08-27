@@ -2,39 +2,26 @@ package ch.csnc.burp;
 
 import java.awt.AWTEvent;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Component;
-import java.awt.Dimension;
 import java.awt.Insets;
 import java.awt.KeyEventDispatcher;
 import java.awt.KeyboardFocusManager;
 import java.awt.Toolkit;
 import java.awt.event.AWTEventListener;
-import java.awt.event.ActionEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
-import java.awt.event.InputEvent;
-import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
-import javax.swing.AbstractAction;
-import javax.swing.DefaultCellEditor;
-import javax.swing.DropMode;
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JMenu;
@@ -46,56 +33,53 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
-import javax.swing.JTextField;
-import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
 import burp.api.montoya.BurpExtension;
 import burp.api.montoya.MontoyaApi;
-import burp.api.montoya.core.Range;
 import burp.api.montoya.http.handler.HttpHandler;
 import burp.api.montoya.http.handler.HttpRequestToBeSent;
 import burp.api.montoya.http.handler.HttpResponseReceived;
 import burp.api.montoya.http.handler.RequestToBeSentAction;
 import burp.api.montoya.http.handler.ResponseReceivedAction;
 import burp.api.montoya.http.message.HttpRequestResponse;
-import burp.api.montoya.http.message.requests.HttpRequest;
-import burp.api.montoya.ui.Selection;
+import burp.api.montoya.persistence.PersistedList;
 import burp.api.montoya.ui.contextmenu.ContextMenuEvent;
 import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
 import burp.api.montoya.ui.editor.EditorOptions;
-import burp.api.montoya.ui.editor.HttpRequestEditor;
-import burp.api.montoya.ui.editor.HttpResponseEditor;
 import net.miginfocom.swing.MigLayout;
 
 public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsProvider, HttpHandler {
 
   public static final String NAME = "Eclipse Scout";
 
+  private static final String PERSIST_KEY_SEQUENCE_NAMES = "sequenceNames";
+  private static final String PERSIST_KEY_EXCHANGES = "exchanges";
+  private static final String PERSIST_KEY_EXCHANGE_NRS = "exchangeNrs";
+  private static final String PERSIST_KEY_EXCHANGE_SEQUENCE_INDEX = "exchangeSequenceIndex";
+  private static final String PERSIST_KEY_VARIABLE_EXCHANGE_NRS = "variableExchangeNrs";
+  private static final String PERSIST_KEY_VARIABLE_NAMES = "variableNames";
+  private static final String PERSIST_KEY_VARIABLE_REGEXES = "variableRegexes";
+  private static final String PERSIST_KEY_VARIABLE_SEQUENCE_INDEX = "variableSequenceIndex";
+
   public static MontoyaApi api;
 
-  private JButton sendSequence;
-  private EclipseScoutTableModel tableModel;
-  private JTable table;
-  private EclipseScoutVariableTableModel variableTableModel;
-  private JTable variableTable;
-  private HttpRequestEditor requestEditor;
-  private HttpResponseEditor responseEditor;
+  private final List<EclipseScoutSequenceTab> sequenceTabs = new ArrayList<>();
+
   private JPanel panel;
   private JTabbedPane tabs;
   private int runTabCount = 0;
 
-  private int selectedRow = -1;
-  private volatile boolean sequenceRunning = false;
-  private volatile boolean cancelRequested = false;
-
   /**
-   * A replay in progress that was kicked off from {@link #handleHttpRequestToBeSent}: the
-   * sequence to keep replaying, the exchange whose response is still outstanding, and, if the
-   * originating request was tagged with {@link EclipseScoutExchange#RESPONSE_HEADER}, the "#" of
-   * the row whose response should be shown back to the caller once replay completes.
+   * A replay in progress that was kicked off from {@link #handleHttpRequestToBeSent}: which
+   * sequence it belongs to (so its "Send sequence"/"Cancel sequence" button and running state
+   * can be driven correctly), the sequence to keep replaying, the exchange whose response is
+   * still outstanding, and, if the originating request was tagged with
+   * {@link EclipseScoutExchange#RESPONSE_HEADER}, the "#" of the row whose response should be
+   * shown back to the caller once replay completes.
    */
-  private record PendingSequence(EclipseScoutSequence sequence, EclipseScoutExchange targetExchange, Integer showNr) {
+  private record PendingSequence(EclipseScoutSequenceTab tab, EclipseScoutSequence sequence,
+      EclipseScoutExchange targetExchange, Integer showNr) {
   }
 
   /** Pending sequence replays, keyed by the Burp message id of their outstanding request. */
@@ -120,294 +104,61 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     }
 
     this.buildUi();
+    try {
+      this.restoreState();
+    } catch (Exception exc) {
+      // Whatever's wrong with previously saved state (a schema this build no longer understands,
+      // corrupted persisted data, ...), the extension must still come up - registerSuiteTab and
+      // friends below are what make it usable at all, and a crash here would happen before any
+      // of them run. Continue with an empty UI rather than not loading.
+      api.logging().logToError("Failed to restore previously saved sequences, starting empty");
+      api.logging().logToError(exc);
+    }
     api.userInterface().registerSuiteTab(NAME, this.getComponent());
     api.userInterface().registerContextMenuItemsProvider(this);
     api.http().registerHttpHandler(this);
+    api.extension().registerUnloadingHandler(this::persistState);
   }
 
   /**
-   * Assembles the extension's suite tab: the sequence table and its actions, the variables
-   * table, and the request/response editors, wiring up their listeners, drag-and-drop, sorting
-   * and keyboard shortcuts.
+   * Assembles the extension's suite tab: an empty {@link #tabs} that sequences get added to (by
+   * {@link #createSequenceTab}, via "New sequence" or {@link #restoreState}), plus the global
+   * key/mouse hooks that keep every sequence tab's in-progress edits committed regardless of
+   * where the user clicks or types next.
    */
   private void buildUi() {
-    var statusLabel = new JLabel();
-    statusLabel.setForeground(Color.DARK_GRAY);
-
-    Consumer<String> logStatus = msg -> {
-      var now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("H:m:s"));
-      statusLabel.setText("[%s] %s".formatted(now, msg));
-    };
-
-    logStatus.accept("initialized");
-
-    var status = new JPanel(new MigLayout());
-    status.add(statusLabel);
-
-    this.sendSequence = new JButton("Send sequence");
-    this.sendSequence.addActionListener(event -> {
-      if (this.sequenceRunning) {
-        this.cancelRequested = true;
-        logStatus.accept("cancelling...");
-        return;
-      }
-      this.cancelRequested = false;
-      this.sequenceRunning = true;
-      this.sendSequence.setText("Cancel sequence");
-      var updateRunTab = this.openRunTab();
-      CompletableFuture.runAsync(() -> {
-        try {
-          logStatus.accept("sending sequence");
-          this.sendSequence(
-              (sequence, exchange, index) -> updateRunTab.accept(sequence.exchanges().subList(0, index + 1)));
-          logStatus.accept(this.cancelRequested ? "cancelled" : "done");
-        } catch (Exception exc) {
-          EclipseScoutExtension.api.logging().logToError(exc);
-          logStatus.accept(exc.getMessage());
-        } finally {
-          this.sequenceRunning = false;
-          this.cancelRequested = false;
-          this.sendSequence.setText("Send sequence");
-        }
-      }).exceptionally(exc -> {
-        EclipseScoutExtension.api.logging().logToError(exc);
-        return null;
-      });
-    });
-
-    var updateHeader = new JButton("Update header");
-    updateHeader.addActionListener(event -> {
-      var nameField = new JTextField();
-      var valueField = new JTextField(20);
-      var removeCheckbox = new JCheckBox("Remove");
-      removeCheckbox.addActionListener(
-          checkboxEvent -> valueField.setEnabled(!removeCheckbox.isSelected()));
-      var fields = new JPanel(new MigLayout("wrap 2", "[][grow, fill]"));
-      fields.add(new JLabel("Header name:"));
-      fields.add(nameField);
-      fields.add(new JLabel("Header value:"));
-      fields.add(valueField);
-      fields.add(new JLabel());
-      fields.add(removeCheckbox);
-      var result = JOptionPane.showConfirmDialog(this.panel, fields, "Update header", JOptionPane.OK_CANCEL_OPTION);
-      if (result != JOptionPane.OK_OPTION) {
-        return;
-      }
-      var name = nameField.getText().strip();
-      if (name.isEmpty()) {
-        return;
-      }
-      this.commitEditorEdits();
-      if (removeCheckbox.isSelected()) {
-        this.tableModel.getExchanges().forEach(exchange -> exchange.removeHeader(name));
-      } else {
-        var value = valueField.getText();
-        this.tableModel.getExchanges().forEach(exchange -> exchange.setHeader(name, value));
-      }
-      this.tableModel.fireTableDataChanged();
-      if (this.selectedRow >= 0) {
-        var modelIndex = this.table.convertRowIndexToModel(this.selectedRow);
-        this.requestEditor.setRequest(this.tableModel.getExchangeAt(modelIndex).request());
-      }
-    });
-
-    var actions = new JPanel();
-    actions.setLayout(new MigLayout("wrap 1", "[160!]"));
-    actions.add(this.sendSequence, "growx");
-    actions.add(updateHeader, "growx");
-
-    this.tableModel = new EclipseScoutTableModel();
-
-    this.variableTableModel = new EclipseScoutVariableTableModel(exchangeNr -> this.tableModel.getExchanges().stream()
-        .filter(exchange -> exchangeNr.equals(exchange.nr()))
-        .findFirst()
-        .orElse(null));
-    this.tableModel.addTableModelListener(event -> this.variableTableModel.refreshPreview());
-
-    Runnable tableDeleteSelectedItems = () -> {
-      var requestResponsesToDelete = new ArrayList<EclipseScoutExchange>();
-      for (int viewIndex : this.table.getSelectedRows()) {
-        var modelIndex = this.table.convertRowIndexToModel(viewIndex);
-        requestResponsesToDelete.add(this.tableModel.getExchangeAt(modelIndex));
-      }
-      requestResponsesToDelete.forEach(this.tableModel::removeRequestResponse);
-    };
-
-    Runnable tableSendToRepeater = () -> {
-      this.commitEditorEdits();
-      for (int viewIndex : this.table.getSelectedRows()) {
-        var modelIndex = this.table.convertRowIndexToModel(viewIndex);
-        var exchange = this.tableModel.getExchangeAt(modelIndex);
-        EclipseScoutExtension.api.repeater().sendToRepeater(exchange.request());
-      }
-    };
-
-    Runnable tableSendToIntruder = () -> {
-      this.commitEditorEdits();
-      for (int viewIndex : this.table.getSelectedRows()) {
-        var modelIndex = this.table.convertRowIndexToModel(viewIndex);
-        var exchange = this.tableModel.getExchangeAt(modelIndex);
-        EclipseScoutExtension.api.intruder().sendToIntruder(exchange.request());
-      }
-    };
-
-    Runnable tableSendToOrganizer = () -> {
-      this.commitEditorEdits();
-      for (int viewIndex : this.table.getSelectedRows()) {
-        var modelIndex = this.table.convertRowIndexToModel(viewIndex);
-        var exchange = this.tableModel.getExchangeAt(modelIndex);
-        var request = exchange.request().withRemovedHeader(EclipseScoutExchange.REQUEST_HEADER);
-        EclipseScoutExtension.api.organizer()
-            .sendToOrganizer(HttpRequestResponse.httpRequestResponse(request, exchange.response()));
-      }
-    };
-
-    var tableContextMenu = new JPopupMenu();
-    tableContextMenu.add(menuItem("Send to Repeater", tableSendToRepeater));
-    tableContextMenu.add(menuItem("Send to Intruder", tableSendToIntruder));
-    tableContextMenu.add(menuItem("Send to Organizer", tableSendToOrganizer));
-    tableContextMenu.addSeparator();
-    tableContextMenu.add(menuItem("Delete selected items", tableDeleteSelectedItems));
-
-    this.table = new JTable(this.tableModel);
-    this.table.setDragEnabled(true);
-    this.table.setDropMode(DropMode.INSERT_ROWS);
-    this.table.setTransferHandler(new EclipseScoutTableRowTransferHandler(this.table, this.tableModel));
-    this.table.setComponentPopupMenu(tableContextMenu);
-    this.table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
-    this.table.getColumnModel().getColumn(0).setPreferredWidth(50);
-    this.table.getColumnModel().getColumn(1).setPreferredWidth(50);
-    this.table.getColumnModel().getColumn(2).setPreferredWidth(50);
-    this.table.getColumnModel().getColumn(3).setPreferredWidth(100);
-    this.table.getColumnModel().getColumn(4).setPreferredWidth(200);
-    this.table.getColumnModel().getColumn(5).setPreferredWidth(400);
-    this.table.getSelectionModel().addListSelectionListener(event -> {
-      if (!event.getValueIsAdjusting()) {
-        this.selectedRow = this.table.getSelectedRow();
-        if (this.selectedRow >= 0) {
-          var modelIndex = this.table.convertRowIndexToModel(this.selectedRow);
-          var requestResponse = this.tableModel.getExchangeAt(modelIndex);
-          this.requestEditor.setRequest(requestResponse.request());
-          this.responseEditor.setResponse(requestResponse.response());
-        }
-      }
-    });
-    // Clicking a column header sorts the table by that column instead of the usual Swing
-    // header-drag-to-reorder-columns behavior.
-    this.table.getTableHeader().addMouseListener(new MouseAdapter() {
-      @Override
-      public void mouseClicked(MouseEvent e) {
-        var viewColumn = EclipseScoutExtension.this.table.columnAtPoint(e.getPoint());
-        if (viewColumn < 0) {
-          return;
-        }
-        var modelColumn = EclipseScoutExtension.this.table.convertColumnIndexToModel(viewColumn);
-        var model = (EclipseScoutTableModel) EclipseScoutExtension.this.table.getModel();
-        model.sortByColumn(modelColumn);
-      }
-    });
-
-    this.variableTable = new JTable(this.variableTableModel);
-    this.variableTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
-    // Without this, JTable's default behavior on losing focus to some other component (rather
-    // than moving to a different cell in the same table) is to leave the in-progress edit
-    // uncommitted instead of saving it - e.g. clicking "Send sequence" right after editing a
-    // regex would silently drop that edit.
-    this.variableTable.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
-    this.variableTable.getColumnModel().getColumn(0).setPreferredWidth(70);
-    this.variableTable.getColumnModel().getColumn(1).setPreferredWidth(100);
-    this.variableTable.getColumnModel().getColumn(2).setPreferredWidth(150);
-    this.variableTable.getColumnModel().getColumn(3).setPreferredWidth(150);
-
-    var regexField = new JTextField();
-    var regexPatternsMenu = new JMenu("Patterns");
-    regexPatternsMenu.add(menuItem("([^\"]+)", () -> regexField.replaceSelection("([^\"]+)")));
-    var regexPopup = new JPopupMenu();
-    regexPopup.add(regexPatternsMenu);
-    regexField.setComponentPopupMenu(regexPopup);
-    this.variableTable.getColumnModel().getColumn(2).setCellEditor(new DefaultCellEditor(regexField));
-    this.variableTable.setPreferredScrollableViewportSize(
-        new Dimension(this.variableTable.getPreferredScrollableViewportSize().width,
-            this.variableTable.getRowHeight() * 5));
-
-    var addVariable = new JButton("+");
-    addVariable.addActionListener(event -> {
-      Integer exchangeNr = null;
-      if (this.selectedRow >= 0) {
-        var modelIndex = this.table.convertRowIndexToModel(this.selectedRow);
-        exchangeNr = this.tableModel.getExchangeAt(modelIndex).nr();
-      }
-      this.variableTableModel.addVariable(exchangeNr);
-    });
-
-    var removeVariable = new JButton("-");
-    removeVariable.addActionListener(event -> {
-      var variablesToRemove = new ArrayList<EclipseScoutVariable>();
-      for (int viewIndex : this.variableTable.getSelectedRows()) {
-        var modelIndex = this.variableTable.convertRowIndexToModel(viewIndex);
-        variablesToRemove.add(this.variableTableModel.getVariableAt(modelIndex));
-      }
-      this.variableTableModel.removeVariables(variablesToRemove);
-    });
-
-    var variableButtons = new JPanel(new MigLayout());
-    variableButtons.add(new JLabel("Variables"));
-    variableButtons.add(addVariable);
-    variableButtons.add(removeVariable);
-
-    var variables = new JPanel();
-    variables.setLayout(new MigLayout("fill, wrap 1, insets 0"));
-    variables.add(variableButtons);
-    variables.add(new JScrollPane(this.variableTable), "grow, push");
-
-    var upper = new JPanel();
-    upper.setLayout(new MigLayout("fill"));
-    upper.add(actions, "dock west");
-    upper.add(status, "dock south, h 30!");
-    upper.add(variables, "dock south, h pref!");
-    upper.add(new JScrollPane(this.table), "grow");
-
-    this.requestEditor = EclipseScoutExtension.api.userInterface().createHttpRequestEditor();
-    this.responseEditor = EclipseScoutExtension.api.userInterface().createHttpResponseEditor(EditorOptions.READ_ONLY);
-
-    var lower = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, this.requestEditor.uiComponent(),
-        this.responseEditor.uiComponent());
-    lower.setResizeWeight(0.5);
-
-    var upperLower = new JSplitPane(JSplitPane.VERTICAL_SPLIT, upper, lower);
-
     this.tabs = new JTabbedPane();
-    this.tabs.addTab("Sequence", upperLower);
 
     this.panel = new JPanel();
     this.panel.setLayout(new BorderLayout());
     this.panel.add(this.tabs, BorderLayout.CENTER);
     this.panel.addComponentListener(new ComponentAdapter() {
-      private KeyEventDispatcher keyEventDispatcher = new KeyEventDispatcher() {
-        @Override
-        public boolean dispatchKeyEvent(KeyEvent event) {
-          try {
-            EclipseScoutExtension.this.commitEditorEdits();
-          } catch (Exception exc) {
-            EclipseScoutExtension.api.logging().logToError(exc);
-          }
-          return false;
+      private KeyEventDispatcher keyEventDispatcher = event -> {
+        try {
+          EclipseScoutExtension.this.sequenceTabs.forEach(EclipseScoutSequenceTab::commitEditorEdits);
+        } catch (Exception exc) {
+          EclipseScoutExtension.api.logging().logToError(exc);
         }
+        return false;
       };
 
-      // Commits an in-progress variables-table cell edit as soon as a mouse press lands
-      // anywhere outside that table (and outside its own "Patterns" popup, so picking a pattern
-      // still works) - JTable's own focus-based commit-on-blur doesn't reliably fire for clicks
-      // that land in Burp's own UI outside this extension's panel.
+      // Commits an in-progress variables-table cell edit, on whichever sequence tab it belongs
+      // to, as soon as a mouse press lands anywhere outside that table (and outside its own
+      // "Patterns" popup, so picking a pattern still works) - JTable's own focus-based
+      // commit-on-blur doesn't reliably fire for clicks that land in Burp's own UI outside this
+      // extension's panel.
       private AWTEventListener mouseEventListener = event -> {
         if (event instanceof MouseEvent mouseEvent && mouseEvent.getID() == MouseEvent.MOUSE_PRESSED
             && mouseEvent.getSource() instanceof Component source
-            && !SwingUtilities.isDescendingFrom(source, EclipseScoutExtension.this.variableTable)
             && SwingUtilities.getAncestorOfClass(JPopupMenu.class, source) == null) {
-          try {
-            EclipseScoutExtension.this.commitVariableTableEdits();
-          } catch (Exception exc) {
-            EclipseScoutExtension.api.logging().logToError(exc);
+          for (var tab : EclipseScoutExtension.this.sequenceTabs) {
+            if (!SwingUtilities.isDescendingFrom(source, tab.getVariableTableComponent())) {
+              try {
+                tab.commitVariableTableEdits();
+              } catch (Exception exc) {
+                EclipseScoutExtension.api.logging().logToError(exc);
+              }
+            }
           }
         }
       };
@@ -424,28 +175,94 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
         Toolkit.getDefaultToolkit().removeAWTEventListener(this.mouseEventListener);
       }
     });
-
-    this.bindShortcut(this.table, JComponent.WHEN_FOCUSED,
-        KeyStroke.getKeyStroke(KeyEvent.VK_R, InputEvent.CTRL_DOWN_MASK), "sendToRepeater", tableSendToRepeater);
-    this.bindShortcut(this.table, JComponent.WHEN_FOCUSED,
-        KeyStroke.getKeyStroke(KeyEvent.VK_I, InputEvent.CTRL_DOWN_MASK), "sendToIntruder", tableSendToIntruder);
-    this.bindShortcut(this.table, JComponent.WHEN_FOCUSED,
-        KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK), "sendToOrganizer", tableSendToOrganizer);
-    this.bindShortcut(this.table, JComponent.WHEN_FOCUSED, KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0),
-        "deleteSelectedItems", tableDeleteSelectedItems);
   }
 
   /**
-   * Opens a new closable tab showing a live, read-only view of one "Send sequence" run - a table
-   * of every exchange in that run in send order, with its own request/response editor pair
-   * mirroring the selected row - and selects it. Kept entirely separate from the always-editable
-   * "Sequence" tab, so the original captured rows stay inspectable and editable while a run is
-   * in progress or after it's finished. Returns a callback the caller should invoke - from any
-   * thread - with the run's exchanges as they progress; each call refreshes the tab's table on
-   * the EDT while preserving its current row selection, so watching a row fill in with its
-   * response doesn't get knocked back to "nothing selected" on every step.
+   * Creates a new sequence named {@code name}, adds it as a tab (with a rename-on-double-click
+   * header), selects it, and returns it. Used by "New sequence" in {@link #provideMenuItems} and
+   * by {@link #restoreState}.
    */
-  private Consumer<List<EclipseScoutExchange>> openRunTab() {
+  private EclipseScoutSequenceTab createSequenceTab(String name) {
+    var tab = new EclipseScoutSequenceTab(this, name);
+    this.sequenceTabs.add(tab);
+    this.tabs.addTab(name, tab.getPanel());
+    var index = this.tabs.indexOfComponent(tab.getPanel());
+    this.tabs.setTabComponentAt(index, this.sequenceTabHeader(tab));
+    this.tabs.setSelectedComponent(tab.getPanel());
+    return tab;
+  }
+
+  /**
+   * A tab header showing {@code tab}'s name, double-click-to-rename. Renaming re-tags every row
+   * already in the sequence (see {@link EclipseScoutTableModel#setName}) and rejects a name
+   * that's blank or already used by another sequence, since {@link EclipseScoutExchange#SEQUENCE_HEADER}
+   * relies on names being unique to route a request back to the right sequence.
+   */
+  private JComponent sequenceTabHeader(EclipseScoutSequenceTab tab) {
+    var label = new JLabel(tab.getName());
+    label.addMouseListener(new MouseAdapter() {
+      @Override
+      public void mouseClicked(MouseEvent event) {
+        // A custom tab component owning its own MouseListener intercepts the click before it
+        // ever reaches JTabbedPane's own tab-switching handling, so clicking this label has to
+        // select the tab itself - otherwise every click here (rename dialog or not) would leave
+        // whatever tab was already selected in place.
+        EclipseScoutExtension.this.tabs.setSelectedComponent(tab.getPanel());
+        if (event.getClickCount() != 2) {
+          return;
+        }
+        var input = JOptionPane.showInputDialog(EclipseScoutExtension.this.panel, "Sequence name:",
+            "Rename sequence", JOptionPane.PLAIN_MESSAGE, null, null, tab.getName());
+        if (input == null) {
+          return;
+        }
+        var newName = String.valueOf(input).strip();
+        if (newName.isEmpty() || newName.equals(tab.getName())) {
+          return;
+        }
+        var collides = EclipseScoutExtension.this.sequenceTabs.stream()
+            .anyMatch(other -> other != tab && other.getName().equals(newName));
+        if (collides) {
+          JOptionPane.showMessageDialog(EclipseScoutExtension.this.panel,
+              "A sequence named \"%s\" already exists.".formatted(newName), "Rename sequence",
+              JOptionPane.WARNING_MESSAGE);
+          return;
+        }
+        tab.rename(newName);
+        label.setText(newName);
+        var index = EclipseScoutExtension.this.tabs.indexOfComponent(tab.getPanel());
+        if (index >= 0) {
+          EclipseScoutExtension.this.tabs.setTitleAt(index, newName);
+        }
+      }
+    });
+    var header = new JPanel(new MigLayout("insets 0, gap 4"));
+    header.setOpaque(false);
+    header.add(label);
+    return header;
+  }
+
+  /** The first "Sequence N" name not already used by an existing sequence. */
+  private String nextDefaultSequenceName() {
+    for (int n = 1;; n++) {
+      var candidate = "Sequence " + n;
+      if (this.sequenceTabs.stream().noneMatch(tab -> tab.getName().equals(candidate))) {
+        return candidate;
+      }
+    }
+  }
+
+  /**
+   * Opens a new closable tab, titled {@code "<namePrefix> - Run N"}, showing a live, read-only
+   * view of one "Send sequence" run - a table of every exchange in that run in send order, with
+   * its own request/response editor pair mirroring the selected row - and selects it. Kept
+   * entirely separate from the sequence tabs, so the original captured rows stay inspectable and
+   * editable while a run is in progress or after it's finished. Returns a callback the caller
+   * should invoke - from any thread - with the run's exchanges as they progress; each call
+   * refreshes the tab's table on the EDT while preserving its current row selection, so watching
+   * a row fill in with its response doesn't get knocked back to "nothing selected" on every step.
+   */
+  Consumer<List<EclipseScoutExchange>> openRunTab(String namePrefix) {
     var runTableModel = new EclipseScoutTableModel();
     var runTable = new JTable(runTableModel);
     runTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
@@ -472,7 +289,7 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     runLower.setResizeWeight(0.5);
     var runSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, new JScrollPane(runTable), runLower);
 
-    var title = "Run " + ++this.runTabCount;
+    var title = "%s - Run %d".formatted(namePrefix, ++this.runTabCount);
     this.tabs.addTab(title, runSplit);
     this.tabs.setTabComponentAt(this.tabs.indexOfComponent(runSplit), this.closableTabHeader(title, runSplit));
     this.tabs.setSelectedComponent(runSplit);
@@ -508,211 +325,191 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     return this.panel;
   }
 
-  /** Appends {@code requestResponse} as a new row, e.g. from the "Send to Eclipse Scout" context menu action. */
-  public void addRequestResponse(HttpRequestResponse requestResponse) {
-    this.tableModel.addRequestResponse(requestResponse);
-  }
-
-  /** All exchanges in the table's current display order, i.e. after any drag-and-drop reordering or sort. */
-  private List<EclipseScoutExchange> getRequestResponesAsDisplayed() {
-    var requestResponses = new ArrayList<EclipseScoutExchange>();
-    for (int i = 0; i < this.table.getRowCount(); i++) {
-      var modelIndex = this.table.convertRowIndexToModel(i);
-      requestResponses.add(this.tableModel.getExchangeAt(modelIndex));
-    }
-    return requestResponses;
-  }
-
   /**
-   * Flushes whatever is currently in the request editor for the selected row into the table
-   * model, if it differs from what's stored there. Called before any action that reads the table
-   * model (sending a sequence, or sending a row to Repeater/Intruder/Organizer), since the
-   * editor's own "modified" flag can otherwise go uncommitted - e.g. a paste followed immediately
-   * by clicking a button, with no intervening key event for the old key-driven commit hook to
-   * catch.
+   * Saves every sequence - its name, rows and variable declarations - not the live "Run N" tabs,
+   * which are just transient views of past sends - into the Burp project, so they're all there
+   * again next time this project is opened. [Professional only] With no project file open
+   * (Community Edition, or Pro run without one), {@link burp.api.montoya.persistence.Persistence}
+   * falls back to storing this only in memory, so it survives the extension being reloaded but
+   * not Burp being restarted. Registered as this extension's unloading handler in
+   * {@link #initialize}, so it runs once, when the extension unloads - not on every edit.
    */
-  private void commitEditorEdits() {
-    if (this.selectedRow >= 0 && this.requestEditor.isModified()) {
-      var modelIndex = this.table.convertRowIndexToModel(this.selectedRow);
-      var editedRequestResponse = HttpRequestResponse.httpRequestResponse(this.requestEditor.getRequest(),
-          this.responseEditor.getResponse());
-      this.tableModel.setRequestResponseAt(modelIndex, editedRequestResponse);
-    }
-  }
+  private void persistState() {
+    var sequenceNames = PersistedList.<String>persistedStringList();
+    var requestResponses = PersistedList.<HttpRequestResponse>persistedHttpRequestResponseList();
+    var exchangeNrs = PersistedList.<Integer>persistedIntegerList();
+    var exchangeSequenceIndex = PersistedList.<Integer>persistedIntegerList();
+    var variableExchangeNrs = PersistedList.<String>persistedStringList();
+    var variableNames = PersistedList.<String>persistedStringList();
+    var variableRegexes = PersistedList.<String>persistedStringList();
+    var variableSequenceIndex = PersistedList.<Integer>persistedIntegerList();
 
-  /**
-   * Stops whatever cell is currently being edited in the variables table, committing its value
-   * into the model - a plain {@code JTable} only does this on its own when focus moves to
-   * another cell in the same table; moving focus to some other component entirely (e.g. clicking
-   * "Send sequence" right after typing a regex) otherwise leaves the edit sitting uncommitted in
-   * the editor component. Called from the global key/mouse hooks installed in {@link #buildUi}
-   * so a keystroke or a click anywhere outside the table (and outside its own "Patterns" popup)
-   * commits whatever cell is open.
-   */
-  private void commitVariableTableEdits() {
-    if (this.variableTable.isEditing()) {
-      this.variableTable.getCellEditor().stopCellEditing();
-    }
-  }
-
-  /**
-   * Binds {@code keyStroke} on {@code component}'s input map under {@code condition} to run
-   * {@code action} - used to give the table's context-menu items (Send to Repeater/Intruder/
-   * Organizer, Delete selected items) keyboard shortcuts without duplicating their logic.
-   *
-   * <p>Deliberately table-only, not ancestor/window-scoped: Ctrl+R/I are Burp's own built-in
-   * shortcuts on its request/response editor component, which claims them at a level extension
-   * code can't override, so binding these any higher than {@link #table} itself would just be
-   * dead code while the editor has focus. {@link EclipseScoutExchange#REQUEST_HEADER} being baked
-   * into every exchange's request (see {@link EclipseScoutExchange#setNr(int)}) is what makes
-   * Burp's own Ctrl+R/I from the editor still work correctly with this extension's sequence
-   * replay, without needing to intercept the keystroke at all.
-   */
-  private void bindShortcut(JComponent component, int condition, KeyStroke keyStroke, String name, Runnable action) {
-    component.getInputMap(condition).put(keyStroke, name);
-    component.getActionMap().put(name, new AbstractAction() {
-      @Override
-      public void actionPerformed(ActionEvent event) {
-        action.run();
+    for (int seqIndex = 0; seqIndex < this.sequenceTabs.size(); seqIndex++) {
+      var tab = this.sequenceTabs.get(seqIndex);
+      sequenceNames.add(tab.getName());
+      for (var exchange : tab.getTableModel().getExchanges()) {
+        requestResponses.add(HttpRequestResponse.httpRequestResponse(exchange.request(), exchange.response()));
+        exchangeNrs.add(exchange.nr());
+        exchangeSequenceIndex.add(seqIndex);
       }
-    });
+      for (var variable : tab.getVariableTableModel().getVariables()) {
+        variableExchangeNrs.add(variable.exchangeNr() != null ? variable.exchangeNr().toString() : "");
+        variableNames.add(variable.name());
+        variableRegexes.add(variable.regex());
+        variableSequenceIndex.add(seqIndex);
+      }
+    }
+
+    var data = EclipseScoutExtension.api.persistence().extensionData();
+    data.setStringList(PERSIST_KEY_SEQUENCE_NAMES, sequenceNames);
+    data.setHttpRequestResponseList(PERSIST_KEY_EXCHANGES, requestResponses);
+    data.setIntegerList(PERSIST_KEY_EXCHANGE_NRS, exchangeNrs);
+    data.setIntegerList(PERSIST_KEY_EXCHANGE_SEQUENCE_INDEX, exchangeSequenceIndex);
+    data.setStringList(PERSIST_KEY_VARIABLE_EXCHANGE_NRS, variableExchangeNrs);
+    data.setStringList(PERSIST_KEY_VARIABLE_NAMES, variableNames);
+    data.setStringList(PERSIST_KEY_VARIABLE_REGEXES, variableRegexes);
+    data.setIntegerList(PERSIST_KEY_VARIABLE_SEQUENCE_INDEX, variableSequenceIndex);
+  }
+
+  /** Restores whatever {@link #persistState} last saved for this project, if anything. Called once from {@link #initialize}. */
+  private void restoreState() {
+    var data = EclipseScoutExtension.api.persistence().extensionData();
+
+    var sequenceNames = data.getStringList(PERSIST_KEY_SEQUENCE_NAMES);
+    if (sequenceNames == null) {
+      return;
+    }
+    var tabs = new ArrayList<EclipseScoutSequenceTab>();
+    for (var name : sequenceNames) {
+      tabs.add(this.createSequenceTab(name));
+    }
+
+    // Restoring exchanges and variables are wrapped independently, not just this whole method
+    // from the outside (see the try/catch around the call in initialize): a corrupt/unexpected
+    // entry in one must not also cost the other, or every other already-restored sequence's rows.
+    try {
+      var requestResponses = data.getHttpRequestResponseList(PERSIST_KEY_EXCHANGES);
+      var exchangeNrs = data.getIntegerList(PERSIST_KEY_EXCHANGE_NRS);
+      var exchangeSequenceIndex = data.getIntegerList(PERSIST_KEY_EXCHANGE_SEQUENCE_INDEX);
+      if (requestResponses != null && exchangeNrs != null && exchangeSequenceIndex != null) {
+        var exchangesBySequence = new HashMap<Integer, List<EclipseScoutExchange>>();
+        for (int i = 0; i < requestResponses.size(); i++) {
+          var exchange = new EclipseScoutExchange(requestResponses.get(i));
+          exchange.setNr(exchangeNrs.get(i));
+          exchangesBySequence.computeIfAbsent(exchangeSequenceIndex.get(i), key -> new ArrayList<>()).add(exchange);
+        }
+        exchangesBySequence.forEach(
+            (seqIndex, exchanges) -> tabs.get(seqIndex).getTableModel().setExchanges(exchanges));
+      }
+    } catch (Exception exc) {
+      EclipseScoutExtension.api.logging().logToError("Failed to restore previously saved sequence rows");
+      EclipseScoutExtension.api.logging().logToError(exc);
+    }
+
+    try {
+      var variableExchangeNrs = data.getStringList(PERSIST_KEY_VARIABLE_EXCHANGE_NRS);
+      var variableNames = data.getStringList(PERSIST_KEY_VARIABLE_NAMES);
+      var variableRegexes = data.getStringList(PERSIST_KEY_VARIABLE_REGEXES);
+      var variableSequenceIndex = data.getIntegerList(PERSIST_KEY_VARIABLE_SEQUENCE_INDEX);
+      if (variableExchangeNrs != null && variableNames != null && variableRegexes != null
+          && variableSequenceIndex != null) {
+        var variablesBySequence = new HashMap<Integer, List<EclipseScoutVariable>>();
+        for (int i = 0; i < variableExchangeNrs.size(); i++) {
+          var exchangeNr = variableExchangeNrs.get(i).isEmpty() ? null : Integer.valueOf(variableExchangeNrs.get(i));
+          variablesBySequence.computeIfAbsent(variableSequenceIndex.get(i), key -> new ArrayList<>())
+              .add(new EclipseScoutVariable(exchangeNr, variableNames.get(i), variableRegexes.get(i)));
+        }
+        variablesBySequence.forEach((seqIndex, variables) -> tabs.get(seqIndex).getVariableTableModel()
+            .setVariables(variables));
+      }
+    } catch (Exception exc) {
+      EclipseScoutExtension.api.logging().logToError("Failed to restore previously saved variables");
+      EclipseScoutExtension.api.logging().logToError(exc);
+    }
   }
 
   /** Builds a menu item labeled {@code label} that runs {@code action} when clicked. */
-  private JMenuItem menuItem(String label, Runnable action) {
+  static JMenuItem menuItem(String label, Runnable action) {
     var item = new JMenuItem(label);
     item.addActionListener(event -> action.run());
     return item;
   }
 
   /**
-   * Replays every displayed row in order, from the start, sending each one directly; stops early
-   * if {@link #cancelRequested} is set between steps. {@code stepListener}, if non-null, is
-   * notified after each step - e.g. to drive a live view of the run in progress - and is called
-   * on this method's own (background) thread, not the EDT.
-   */
-  public void sendSequence(EclipseScoutSequence.StepListener stepListener) {
-    this.commitEditorEdits();
-    var requestResponses = this.getRequestResponesAsDisplayed();
-    var sequence = new EclipseScoutSequence(requestResponses, this.variableTableModel.getVariables());
-    sequence.setStepListener(stepListener);
-    while (sequence.hasNext() && !this.cancelRequested) {
-      sequence.sendNext();
-    }
-  }
-
-  /**
-   * Adds a "Send to Eclipse Scout" item that copies the selected request/response(s) into the
-   * sequence table, plus, when invoked from within this extension's own request editor pane, a
-   * "Variables" submenu that inserts a {@code $VAR:name$} placeholder for a declared variable at
-   * the current cursor position.
+   * Adds an "Eclipse Scout" submenu: "New sequence" (creates a new, empty sequence and adds the
+   * selected request/response(s) to it), then one item per existing sequence (adds to that one
+   * instead) - plus, when invoked from within one of this extension's own request editor panes,
+   * that sequence's "Variables" submenu, which inserts a {@code $VAR:name$} placeholder for a
+   * declared variable at the current cursor position.
    */
   @Override
   public List<Component> provideMenuItems(ContextMenuEvent event) {
     var items = new ArrayList<Component>();
 
-    var sendTo = new JMenuItem("Send to %s".formatted(EclipseScoutExtension.NAME));
-    sendTo.addActionListener((actionEvent) -> {
-      event.selectedRequestResponses().forEach(this::addRequestResponse);
-    });
-    items.add(sendTo);
-
-    if (this.isOwnRequestEditor(event)) {
-      this.buildVariablesMenu().ifPresent(items::add);
+    var sendToMenu = new JMenu(EclipseScoutExtension.NAME);
+    sendToMenu.add(menuItem("New sequence", () -> {
+      var tab = this.createSequenceTab(this.nextDefaultSequenceName());
+      event.selectedRequestResponses().forEach(tab::addRequestResponse);
+    }));
+    if (!this.sequenceTabs.isEmpty()) {
+      sendToMenu.addSeparator();
+      for (var tab : this.sequenceTabs) {
+        sendToMenu.add(menuItem(tab.getName(), () -> event.selectedRequestResponses().forEach(tab::addRequestResponse)));
+      }
     }
+    items.add(sendToMenu);
+
+    this.sequenceTabs.stream()
+        .filter(tab -> tab.isOwnRequestEditor(event))
+        .findFirst()
+        .flatMap(EclipseScoutSequenceTab::buildVariablesMenu)
+        .ifPresent(items::add);
 
     return items;
   }
 
   /**
-   * Whether {@code event} originated from within this extension's own request editor pane -
-   * determined from the native input event's source component rather than {@code event}'s tool
-   * type, since any extension-provided suite tab reports
-   * {@link burp.api.montoya.core.ToolType#EXTENSIONS} regardless of which extension's UI it
-   * actually came from.
-   */
-  private boolean isOwnRequestEditor(ContextMenuEvent event) {
-    var inputEvent = event.inputEvent();
-    return inputEvent != null && inputEvent.getSource() instanceof Component source
-        && SwingUtilities.isDescendingFrom(source, this.requestEditor.uiComponent());
-  }
-
-  /**
-   * Builds a "Variables" submenu listing every declared variable with a non-blank name, or
-   * {@link Optional#empty()} if none are declared. Selecting an entry inserts a
-   * {@code $VAR:name$} placeholder into {@link #requestEditor} at its current cursor position.
-   */
-  private Optional<JMenu> buildVariablesMenu() {
-    var names = this.variableTableModel.getVariables().stream()
-        .map(EclipseScoutVariable::name)
-        .filter(name -> name != null && !name.isBlank())
-        .distinct()
-        .toList();
-    if (names.isEmpty()) {
-      return Optional.empty();
-    }
-    var menu = new JMenu("Variables");
-    for (var name : names) {
-      var item = new JMenuItem(name);
-      item.addActionListener(actionEvent -> this.insertVariablePlaceholder(name));
-      menu.add(item);
-    }
-    return Optional.of(menu);
-  }
-
-  /**
-   * Inserts a {@code $VAR:name$} placeholder into {@link #requestEditor}, replacing its current
-   * selection if it has one, or inserting at the cursor position otherwise, and writes the result
-   * straight into the table model - a programmatic {@link HttpRequestEditor#setRequest} doesn't
-   * set the editor's "modified" flag, so leaving this to the usual {@link #commitEditorEdits}
-   * path would silently drop the inserted placeholder once the row is no longer selected.
-   */
-  private void insertVariablePlaceholder(String name) {
-    var request = this.requestEditor.getRequest();
-    var text = request.toString();
-    var range = this.requestEditor.selection()
-        .map(Selection::offsets)
-        .orElseGet(() -> Range.range(this.requestEditor.caretPosition(), this.requestEditor.caretPosition()));
-    var updated = text.substring(0, range.startIndexInclusive()) + "$VAR:" + name + "$"
-        + text.substring(range.endIndexExclusive());
-    var updatedRequest = HttpRequest.httpRequest(request.httpService(), updated);
-    this.requestEditor.setRequest(updatedRequest);
-    if (this.selectedRow >= 0) {
-      var modelIndex = this.table.convertRowIndexToModel(this.selectedRow);
-      var editedRequestResponse = HttpRequestResponse.httpRequestResponse(updatedRequest,
-          this.responseEditor.getResponse());
-      this.tableModel.setRequestResponseAt(modelIndex, editedRequestResponse);
-    }
-  }
-
-  /**
    * Intercepts a request tagged with {@link EclipseScoutExchange#REQUEST_HEADER} - sent to
-   * Repeater/Intruder, or edited live and resent from there - and, before it goes out, replays
-   * every earlier row of a fresh sequence up to that row's position so its session state and ids
-   * are established, then substitutes the tagged request in as that row (applying the same
-   * uiSessionId propagation, renumbering, id remapping and variable substitution), tracking the
-   * resulting {@link PendingSequence} so {@link #handleHttpResponseReceived} can continue
-   * replaying once its response arrives.
+   * Repeater/Intruder, or edited live and resent from there - and, before it goes out, uses
+   * {@link EclipseScoutExchange#SEQUENCE_HEADER} to find which sequence it belongs to, replays
+   * every earlier row of a fresh run of that sequence up to that row's position so its session
+   * state and ids are established, then substitutes the tagged request in as that row (applying
+   * the same uiSessionId propagation, renumbering, id remapping and variable substitution),
+   * tracking the resulting {@link PendingSequence} so {@link #handleHttpResponseReceived} can
+   * continue replaying once its response arrives.
    */
   @Override
   public RequestToBeSentAction handleHttpRequestToBeSent(HttpRequestToBeSent requestToBeSent) {
     try {
       if (requestToBeSent.hasHeader(EclipseScoutExchange.REQUEST_HEADER)) {
         var nr = Integer.parseInt(requestToBeSent.headerValue(EclipseScoutExchange.REQUEST_HEADER));
+        var sequenceName = requestToBeSent.hasHeader(EclipseScoutExchange.SEQUENCE_HEADER)
+            ? requestToBeSent.headerValue(EclipseScoutExchange.SEQUENCE_HEADER)
+            : null;
         var showNr = requestToBeSent.hasHeader(EclipseScoutExchange.RESPONSE_HEADER)
             ? Integer.parseInt(requestToBeSent.headerValue(EclipseScoutExchange.RESPONSE_HEADER))
             : null;
         var request = requestToBeSent.withRemovedHeader(EclipseScoutExchange.REQUEST_HEADER)
-            .withRemovedHeader(EclipseScoutExchange.RESPONSE_HEADER);
+            .withRemovedHeader(EclipseScoutExchange.RESPONSE_HEADER)
+            .withRemovedHeader(EclipseScoutExchange.SEQUENCE_HEADER);
 
-        var sequence = new EclipseScoutSequence(this.getRequestResponesAsDisplayed(), this.variableTableModel.getVariables());
+        var tab = sequenceName == null ? null
+            : this.sequenceTabs.stream().filter(t -> t.getName().equals(sequenceName)).findFirst().orElse(null);
+        if (tab == null) {
+          EclipseScoutExtension.api.logging()
+              .logToError("No sequence named \"%s\" found, sending as-is".formatted(sequenceName));
+          return RequestToBeSentAction.continueWith(request);
+        }
+
+        var sequence = new EclipseScoutSequence(tab.getRequestResponsesAsDisplayed(),
+            tab.getVariableTableModel().getVariables());
         var targetIndex = sequence.indexOfNr(nr);
         if (targetIndex < 0) {
           EclipseScoutExtension.api.logging().logToError("No row with # %d found, sending as-is".formatted(nr));
           return RequestToBeSentAction.continueWith(request);
         }
         var targetExchange = sequence.advanceTo(targetIndex, request);
-        this.sequences.put(requestToBeSent.messageId(), new PendingSequence(sequence, targetExchange, showNr));
+        this.sequences.put(requestToBeSent.messageId(), new PendingSequence(tab, sequence, targetExchange, showNr));
         return RequestToBeSentAction.continueWith(targetExchange.request());
       }
     } catch (Exception exc) {
@@ -734,17 +531,13 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     var pending = this.sequences.remove(responseReceived.messageId());
     if (pending != null) {
       pending.targetExchange().setResponse(responseReceived);
-      this.cancelRequested = false;
-      this.sequenceRunning = true;
-      this.sendSequence.setText("Cancel sequence");
+      pending.tab().beginRun();
       try {
-        while (pending.sequence().hasNext() && !this.cancelRequested) {
+        while (pending.sequence().hasNext() && !pending.tab().isCancelRequested()) {
           pending.sequence().sendNext();
         }
       } finally {
-        this.sequenceRunning = false;
-        this.cancelRequested = false;
-        this.sendSequence.setText("Send sequence");
+        pending.tab().endRun();
       }
       if (pending.showNr() != null) {
         var toShow = pending.sequence().exchangeWithNr(pending.showNr());

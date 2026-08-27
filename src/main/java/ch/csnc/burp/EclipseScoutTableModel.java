@@ -3,6 +3,7 @@ package ch.csnc.burp;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 
 import javax.swing.table.AbstractTableModel;
 
@@ -17,8 +18,46 @@ public class EclipseScoutTableModel extends AbstractTableModel {
   private String[] columnNames = new String[] { "#", "Req#", "Res#", "Method", "Host", "Path" };
   private List<EclipseScoutExchange> exchanges = new ArrayList<>();
 
-  /** Creates an empty table model with no captured exchanges yet. */
+  /**
+   * The static "#" the next row added via {@link #addExchange}/{@link #addRequestResponse} will
+   * get - a monotonically increasing counter, never derived from the current row count, so a
+   * deleted row's "#" is never handed out again to some unrelated later row. Reusing "#"s that
+   * way would silently rebind anything still referencing the old row - e.g. a variable's
+   * {@link EclipseScoutVariable#exchangeNr()} - to whatever new row happened to land on the same
+   * number.
+   */
+  private int nextNr = 1;
+
+  /**
+   * The sequence this table belongs to, tagged onto every row's request via
+   * {@link EclipseScoutExchange#setSequenceName} so {@code EclipseScoutExtension} can route a
+   * request coming back from Repeater/Intruder to the right sequence - or {@code null} for an
+   * anonymous, throwaway table (e.g. a "Run N" tab's live view), which never needs that tagging.
+   */
+  private String name;
+
+  /** Creates an empty, anonymous table model with no captured exchanges yet - see {@link #name}. */
   public EclipseScoutTableModel() {
+    this(null);
+  }
+
+  /** Creates an empty table model for the sequence named {@code name} - see {@link #name}. */
+  public EclipseScoutTableModel(String name) {
+    this.name = name;
+  }
+
+  /** This sequence's display name, or {@code null} for an anonymous table - see {@link #name}. */
+  public String getName() {
+    return this.name;
+  }
+
+  /**
+   * Renames this sequence, re-tagging every existing row's request with the new name so a
+   * request already sent to Repeater/Intruder before the rename still routes back correctly.
+   */
+  public void setName(String name) {
+    this.name = name;
+    this.exchanges.forEach(exchange -> exchange.setSequenceName(name));
   }
 
   @Override
@@ -104,6 +143,9 @@ public class EclipseScoutTableModel extends AbstractTableModel {
     var nr = this.exchanges.get(row).nr();
     var exchange = new EclipseScoutExchange(requestResponse);
     exchange.setNr(nr);
+    if (this.name != null) {
+      exchange.setSequenceName(this.name);
+    }
     this.setExchangeAt(row, exchange);
   }
 
@@ -118,9 +160,12 @@ public class EclipseScoutTableModel extends AbstractTableModel {
     this.addExchange(new EclipseScoutExchange(requestResponse));
   }
 
-  /** Appends {@code exchange} as a new last row, assigning it the next static "#" in sequence. */
+  /** Appends {@code exchange} as a new last row, assigning it the next static "#" - see {@link #nextNr}. */
   public void addExchange(EclipseScoutExchange exchange) {
-    exchange.setNr(this.exchanges.size() + 1);
+    exchange.setNr(this.nextNr++);
+    if (this.name != null) {
+      exchange.setSequenceName(this.name);
+    }
     this.exchanges.add(exchange);
     this.fireTableDataChanged();
   }
@@ -131,9 +176,19 @@ public class EclipseScoutTableModel extends AbstractTableModel {
     this.fireTableDataChanged();
   }
 
-  /** Replaces all rows with independent clones of {@code exchanges}, in the given order. */
+  /**
+   * Replaces all rows with independent clones of {@code exchanges}, in the given order, and
+   * advances {@link #nextNr} past the highest "#" among them if it isn't already, so a row added
+   * afterward can't collide with one just loaded - e.g. when restoring previously persisted rows.
+   */
   public void setExchanges(List<EclipseScoutExchange> exchanges) {
     this.exchanges = new ArrayList<>(exchanges.stream().map(EclipseScoutExchange::clone).toList());
+    if (this.name != null) {
+      this.exchanges.forEach(exchange -> exchange.setSequenceName(this.name));
+    }
+    this.exchanges.stream().map(EclipseScoutExchange::nr).filter(Objects::nonNull)
+        .mapToInt(Integer::intValue).max()
+        .ifPresent(maxNr -> this.nextNr = Math.max(this.nextNr, maxNr + 1));
     this.fireTableDataChanged();
   }
 
