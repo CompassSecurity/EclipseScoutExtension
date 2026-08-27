@@ -45,6 +45,7 @@ import javax.swing.SwingUtilities;
 
 import burp.api.montoya.BurpExtension;
 import burp.api.montoya.MontoyaApi;
+import burp.api.montoya.core.Range;
 import burp.api.montoya.http.handler.HttpHandler;
 import burp.api.montoya.http.handler.HttpRequestToBeSent;
 import burp.api.montoya.http.handler.HttpResponseReceived;
@@ -52,6 +53,7 @@ import burp.api.montoya.http.handler.RequestToBeSentAction;
 import burp.api.montoya.http.handler.ResponseReceivedAction;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
+import burp.api.montoya.ui.Selection;
 import burp.api.montoya.ui.contextmenu.ContextMenuEvent;
 import burp.api.montoya.ui.contextmenu.ContextMenuItemsProvider;
 import burp.api.montoya.ui.editor.EditorOptions;
@@ -511,12 +513,18 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     return Optional.of(menu);
   }
 
-  /** Inserts a {@code $VAR:name$} placeholder into {@link #requestEditor} at its current cursor position. */
+  /**
+   * Inserts a {@code $VAR:name$} placeholder into {@link #requestEditor}, replacing its current
+   * selection if it has one, or inserting at the cursor position otherwise.
+   */
   private void insertVariablePlaceholder(String name) {
     var request = this.requestEditor.getRequest();
     var text = request.toString();
-    var caret = this.requestEditor.caretPosition();
-    var updated = text.substring(0, caret) + "$VAR:" + name + "$" + text.substring(caret);
+    var range = this.requestEditor.selection()
+        .map(Selection::offsets)
+        .orElseGet(() -> Range.range(this.requestEditor.caretPosition(), this.requestEditor.caretPosition()));
+    var updated = text.substring(0, range.startIndexInclusive()) + "$VAR:" + name + "$"
+        + text.substring(range.endIndexExclusive());
     this.requestEditor.setRequest(HttpRequest.httpRequest(request.httpService(), updated));
   }
 
