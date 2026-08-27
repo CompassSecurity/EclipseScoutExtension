@@ -444,28 +444,7 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     var requestResponses = this.getRequestResponesAsDisplayed();
     var sequence = new EclipseScoutSequence(requestResponses, this.variableTableModel.getVariables());
     while (sequence.hasNext() && !this.cancelRequested) {
-      var exchange = sequence.next();
-      exchange.send();
-      this.refreshResponseEditorIfSelected(exchange);
-    }
-  }
-
-  /**
-   * Shows {@code exchange}'s current response live in the response editor if the row sharing its
-   * static "#" happens to be the selected one - otherwise a no-op, leaving the editor showing
-   * whatever was in it before the replay until the row is reselected. Deliberately doesn't write
-   * the response back onto the table row itself: {@link EclipseScoutSequence} clones exchanges
-   * before replaying them precisely so each run starts from the pristine originally-captured
-   * request/response, which its classId-based id remapping depends on - persisting a replay's
-   * response onto the row would shift that baseline for the next run.
-   */
-  private void refreshResponseEditorIfSelected(EclipseScoutExchange exchange) {
-    if (exchange.nr() == null || this.selectedRow < 0) {
-      return;
-    }
-    var modelIndex = this.table.convertRowIndexToModel(this.selectedRow);
-    if (exchange.nr().equals(this.tableModel.getExchangeAt(modelIndex).nr())) {
-      this.responseEditor.setResponse(exchange.response());
+      sequence.next().send();
     }
   }
 
@@ -528,15 +507,12 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     var pending = this.sequences.remove(responseReceived.messageId());
     if (pending != null) {
       pending.targetExchange().setResponse(responseReceived);
-      this.refreshResponseEditorIfSelected(pending.targetExchange());
       this.cancelRequested = false;
       this.sequenceRunning = true;
       this.sendSequence.setText("Cancel sequence");
       try {
         while (pending.sequence().hasNext() && !this.cancelRequested) {
-          var exchange = pending.sequence().next();
-          exchange.send();
-          this.refreshResponseEditorIfSelected(exchange);
+          pending.sequence().next().send();
         }
       } finally {
         this.sequenceRunning = false;
