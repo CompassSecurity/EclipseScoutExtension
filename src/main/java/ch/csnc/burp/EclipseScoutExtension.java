@@ -436,8 +436,8 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
   }
 
   /**
-   * Replays every displayed row in order, from the start, sending each one directly and writing
-   * its response back onto its row; stops early if {@link #cancelRequested} is set between steps.
+   * Replays every displayed row in order, from the start, sending each one directly; stops early
+   * if {@link #cancelRequested} is set between steps.
    */
   public void sendSequence() {
     this.commitEditorEdits();
@@ -446,29 +446,26 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     while (sequence.hasNext() && !this.cancelRequested) {
       var exchange = sequence.next();
       exchange.send();
-      this.updateRowResponse(exchange);
+      this.refreshResponseEditorIfSelected(exchange);
     }
   }
 
   /**
-   * Writes {@code exchange}'s current response back onto the table row sharing its static "#",
-   * so the sequence table reflects what a replay actually returned, and refreshes the response
-   * editor too if that row happens to be the selected one - otherwise it keeps showing whatever
-   * was in it before the replay until the row is reselected. Deliberately leaves the row's own
-   * captured request untouched - {@link EclipseScoutSequence} clones exchanges before replaying
-   * them precisely so each run starts from the pristine originally-captured request, which its
-   * id remapping and renumbering depend on.
+   * Shows {@code exchange}'s current response live in the response editor if the row sharing its
+   * static "#" happens to be the selected one - otherwise a no-op, leaving the editor showing
+   * whatever was in it before the replay until the row is reselected. Deliberately doesn't write
+   * the response back onto the table row itself: {@link EclipseScoutSequence} clones exchanges
+   * before replaying them precisely so each run starts from the pristine originally-captured
+   * request/response, which its classId-based id remapping depends on - persisting a replay's
+   * response onto the row would shift that baseline for the next run.
    */
-  private void updateRowResponse(EclipseScoutExchange exchange) {
-    if (exchange.nr() == null) {
+  private void refreshResponseEditorIfSelected(EclipseScoutExchange exchange) {
+    if (exchange.nr() == null || this.selectedRow < 0) {
       return;
     }
-    this.tableModel.setResponseForNr(exchange.nr(), exchange.response());
-    if (this.selectedRow >= 0) {
-      var modelIndex = this.table.convertRowIndexToModel(this.selectedRow);
-      if (exchange.nr().equals(this.tableModel.getExchangeAt(modelIndex).nr())) {
-        this.responseEditor.setResponse(exchange.response());
-      }
+    var modelIndex = this.table.convertRowIndexToModel(this.selectedRow);
+    if (exchange.nr().equals(this.tableModel.getExchangeAt(modelIndex).nr())) {
+      this.responseEditor.setResponse(exchange.response());
     }
   }
 
@@ -531,7 +528,7 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     var pending = this.sequences.remove(responseReceived.messageId());
     if (pending != null) {
       pending.targetExchange().setResponse(responseReceived);
-      this.updateRowResponse(pending.targetExchange());
+      this.refreshResponseEditorIfSelected(pending.targetExchange());
       this.cancelRequested = false;
       this.sequenceRunning = true;
       this.sendSequence.setText("Cancel sequence");
@@ -539,7 +536,7 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
         while (pending.sequence().hasNext() && !this.cancelRequested) {
           var exchange = pending.sequence().next();
           exchange.send();
-          this.updateRowResponse(exchange);
+          this.refreshResponseEditorIfSelected(exchange);
         }
       } finally {
         this.sequenceRunning = false;

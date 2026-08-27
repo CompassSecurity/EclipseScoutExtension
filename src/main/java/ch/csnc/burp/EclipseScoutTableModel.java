@@ -7,7 +7,6 @@ import java.util.List;
 import javax.swing.table.AbstractTableModel;
 
 import burp.api.montoya.http.message.HttpRequestResponse;
-import burp.api.montoya.http.message.responses.HttpResponse;
 
 /**
  * Backs the main sequence table: one row per captured exchange, in display order, showing its
@@ -86,23 +85,6 @@ public class EclipseScoutTableModel extends AbstractTableModel {
     this.fireTableDataChanged();
   }
 
-  /**
-   * Updates the response of the row whose exchange has the given static {@code nr}, if any -
-   * a no-op if no row has that "#". Used to reflect what a "Send sequence" replay actually
-   * returned without touching the row's own captured request, which must stay pristine for
-   * {@link EclipseScoutSequence}'s per-run id remapping and renumbering on later replays.
-   */
-  public void setResponseForNr(int nr, HttpResponse response) {
-    for (int i = 0; i < this.exchanges.size(); i++) {
-      var exchange = this.exchanges.get(i);
-      if (exchange.nr() != null && exchange.nr() == nr) {
-        exchange.setResponse(response);
-        this.fireTableRowsUpdated(i, i);
-        return;
-      }
-    }
-  }
-
   /** All rows' exchanges, in display order - the live backing list, not a copy. */
   public List<EclipseScoutExchange> getExchanges() {
     return this.exchanges;
@@ -116,7 +98,7 @@ public class EclipseScoutTableModel extends AbstractTableModel {
   /**
    * Replaces the row's exchange with one built from {@code requestResponse}, e.g. after editing
    * it live in the request/response editors, while preserving the row's original static "#" so
-   * it stays addressable by {@link #setResponseForNr} and {@link EclipseScoutSequence}.
+   * it stays addressable by {@link EclipseScoutSequence}.
    */
   public void setRequestResponseAt(int row, HttpRequestResponse requestResponse) {
     var nr = this.exchanges.get(row).nr();

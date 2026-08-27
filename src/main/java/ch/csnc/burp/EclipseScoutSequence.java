@@ -104,9 +104,9 @@ public class EclipseScoutSequence {
     this.exchanges = exchanges.stream().map(EclipseScoutExchange::clone).toList();
     this.variableDefinitions = variableDefinitions;
     for (var exchange : this.exchanges) {
-      this.adapterResolver.learnOriginal(exchange.originalResponseAdapterClassIds());
-      this.nodeResolver.learnOriginal(exchange.originalResponseNodeClassIds());
-      this.originalRowIdToNodeId.putAll(exchange.originalResponseRowNodeIds());
+      this.adapterResolver.learnOriginal(exchange.responseAdapterClassIds());
+      this.nodeResolver.learnOriginal(exchange.responseNodeClassIds());
+      this.originalRowIdToNodeId.putAll(exchange.responseRowNodeIds());
     }
   }
 
