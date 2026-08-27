@@ -238,10 +238,32 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
         }
       }
     });
+    var close = new JButton("x");
+    close.setMargin(new Insets(0, 4, 0, 4));
+    close.setFocusable(false);
+    close.setBorderPainted(false);
+    close.setContentAreaFilled(false);
+    close.addActionListener(event -> {
+      var confirmed = JOptionPane.showConfirmDialog(EclipseScoutExtension.this.panel,
+          "Remove sequence \"%s\" and its %d row(s)? This cannot be undone."
+              .formatted(tab.getName(), tab.getTableModel().getRowCount()),
+          "Remove sequence", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+      if (confirmed == JOptionPane.YES_OPTION) {
+        this.removeSequenceTab(tab);
+      }
+    });
+
     var header = new JPanel(new MigLayout("insets 0, gap 4"));
     header.setOpaque(false);
     header.add(label);
+    header.add(close);
     return header;
+  }
+
+  /** Removes {@code tab}'s tab and stops tracking it - see {@link #sequenceTabHeader}'s "x" button. */
+  private void removeSequenceTab(EclipseScoutSequenceTab tab) {
+    this.sequenceTabs.remove(tab);
+    this.tabs.remove(tab.getPanel());
   }
 
   /** The first "Sequence N" name not already used by an existing sequence. */
