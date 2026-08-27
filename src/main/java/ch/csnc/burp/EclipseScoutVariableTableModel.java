@@ -20,6 +20,10 @@ public class EclipseScoutVariableTableModel extends AbstractTableModel {
   private final List<EclipseScoutVariable> variables = new ArrayList<>();
   private final Function<Integer, EclipseScoutExchange> exchangeByNr;
 
+  /**
+   * Creates an empty variables model, using {@code exchangeByNr} to look up the exchange a
+   * variable currently targets - by static "#" - when computing its live preview.
+   */
   public EclipseScoutVariableTableModel(Function<Integer, EclipseScoutExchange> exchangeByNr) {
     this.exchangeByNr = exchangeByNr;
   }
@@ -39,11 +43,13 @@ public class EclipseScoutVariableTableModel extends AbstractTableModel {
     return this.columnNames[col];
   }
 
+  /** Only "Exchange #", "Name" and "Regex" are user-editable; "Preview" is computed. */
   @Override
   public boolean isCellEditable(int row, int col) {
     return col == 0 || col == 1 || col == 2;
   }
 
+  /** Renders the given column of the row's variable, computing "Preview" live via {@link #preview}. */
   @Override
   public Object getValueAt(int row, int col) {
     var variable = this.variables.get(row);
@@ -56,6 +62,7 @@ public class EclipseScoutVariableTableModel extends AbstractTableModel {
     };
   }
 
+  /** Applies an edit from the "Exchange #", "Name" or "Regex" column; unparsable exchange numbers are ignored. */
   @Override
   public void setValueAt(Object value, int row, int col) {
     var variable = this.variables.get(row);
@@ -76,6 +83,11 @@ public class EclipseScoutVariableTableModel extends AbstractTableModel {
     this.fireTableRowsUpdated(row, row);
   }
 
+  /**
+   * What {@code variable}'s regex currently extracts from its target exchange's response body,
+   * or an empty string if the variable is incomplete, its exchange has no response yet, or the
+   * regex doesn't match; {@code "invalid regex"} if the regex fails to compile.
+   */
   private String preview(EclipseScoutVariable variable) {
     if (variable.exchangeNr() == null || variable.regex() == null || variable.regex().isBlank()) {
       return "";
@@ -99,24 +111,29 @@ public class EclipseScoutVariableTableModel extends AbstractTableModel {
     }
   }
 
+  /** Appends a new, otherwise-blank variable pre-targeted at {@code exchangeNr} (may be {@code null}). */
   public void addVariable(Integer exchangeNr) {
     this.variables.add(new EclipseScoutVariable(exchangeNr, "", ""));
     this.fireTableDataChanged();
   }
 
+  /** Deletes each of {@code toRemove} that is still present, ignoring the rest. */
   public void removeVariables(List<EclipseScoutVariable> toRemove) {
     this.variables.removeAll(toRemove);
     this.fireTableDataChanged();
   }
 
+  /** The variable backing the row at model index {@code row}. */
   public EclipseScoutVariable getVariableAt(int row) {
     return this.variables.get(row);
   }
 
+  /** All declared variables - the live backing list, not a copy. */
   public List<EclipseScoutVariable> getVariables() {
     return this.variables;
   }
 
+  /** Recomputes and redisplays every row's "Preview" column, e.g. after a sequence replay updates a response. */
   public void refreshPreview() {
     this.fireTableDataChanged();
   }

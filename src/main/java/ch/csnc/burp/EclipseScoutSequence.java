@@ -29,6 +29,10 @@ public class EclipseScoutSequence {
     private final Map<String, List<String>> originalIdsByClassId = new HashMap<>();
     private final Map<String, List<String>> replayIdsByClassId = new HashMap<>();
 
+    /**
+     * Registers ids seen in an originally captured response, so later {@link #resolve} calls
+     * can map each one to its replay-run counterpart by classId and occurrence order.
+     */
     void learnOriginal(Map<String, String> idToClassId) {
       idToClassId.forEach((id, classId) -> {
         this.originalIdToClassId.put(id, classId);
@@ -36,11 +40,20 @@ public class EclipseScoutSequence {
       });
     }
 
+    /**
+     * Registers ids seen in a response produced during this replay run, extending each
+     * classId's list of replay-side occurrences that {@link #resolve} matches against.
+     */
     void learnReplay(Map<String, String> idToClassId) {
       idToClassId.forEach(
           (id, classId) -> this.replayIdsByClassId.computeIfAbsent(classId, key -> new ArrayList<>()).add(id));
     }
 
+    /**
+     * The replay-run id that corresponds to {@code originalId}, found by locating its classId
+     * and matching by occurrence order within that classId, or {@code null} if {@code originalId}
+     * is unknown or its classId hasn't been observed yet on the replay side.
+     */
     String resolve(String originalId) {
       var classId = this.originalIdToClassId.get(originalId);
       if (classId == null) {
@@ -81,6 +94,12 @@ public class EclipseScoutSequence {
    */
   private final Map<String, String> replayNodeIdToRowId = new HashMap<>();
 
+  /**
+   * Starts a fresh replay run over independent clones of {@code exchanges} (so replaying never
+   * mutates the caller's own captured rows) and primes both {@link IdentityResolver}s and
+   * {@link #originalRowIdToNodeId} from every exchange's originally captured response, ahead of
+   * seeing any replay-side responses.
+   */
   public EclipseScoutSequence(List<EclipseScoutExchange> exchanges, List<EclipseScoutVariable> variableDefinitions) {
     this.exchanges = exchanges.stream().map(EclipseScoutExchange::clone).toList();
     this.variableDefinitions = variableDefinitions;
@@ -91,6 +110,7 @@ public class EclipseScoutSequence {
     }
   }
 
+  /** Whether {@link #next()} has another exchange left to return in this replay run. */
   public boolean hasNext() {
     return this.position < this.exchanges.size();
   }
@@ -145,6 +165,13 @@ public class EclipseScoutSequence {
     return exchange;
   }
 
+  /**
+   * The replay-run row id that mirrors the same node as {@code originalRowId} did originally,
+   * found by resolving the node it mirrored to its replay-run id and looking up which row is
+   * currently observed mirroring that node - or {@code null} if any step of that chain is
+   * unresolvable (the row has no mirrored node, its node's classId hasn't been matched yet, or
+   * no row has been observed mirroring the resolved node).
+   */
   private String resolveRowId(String originalRowId) {
     var originalNodeId = this.originalRowIdToNodeId.get(originalRowId);
     if (originalNodeId == null) {

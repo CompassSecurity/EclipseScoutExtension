@@ -18,11 +18,13 @@ public class EclipseScoutTableRowTransferHandler extends TransferHandler {
     private final EclipseScoutTableModel model;
     private int draggedModelRow;
 
+    /** Wires drag-and-drop row reordering onto {@code table}, backed by {@code model}. */
     public EclipseScoutTableRowTransferHandler(JTable table, EclipseScoutTableModel model) {
         this.table = table;
         this.model = model;
     }
 
+    /** Records the dragged row's model index so {@link #importData} knows which row to move. */
     @Override
     protected Transferable createTransferable(JComponent c) {
         var viewRow = table.getSelectedRow();
@@ -35,16 +37,22 @@ public class EclipseScoutTableRowTransferHandler extends TransferHandler {
         return new StringSelection(String.valueOf(draggedModelRow));
     }
 
+    /** Restricts this handler to row-moving drags; copy is not supported. */
     @Override
     public int getSourceActions(JComponent c) {
         return MOVE;
     }
 
+    /** Accepts only drops carrying the string payload produced by {@link #createTransferable}. */
     @Override
     public boolean canImport(TransferSupport support) {
         return support.isDrop() && support.isDataFlavorSupported(DataFlavor.stringFlavor);
     }
 
+    /**
+     * Moves the row recorded by {@link #createTransferable} to the drop target's row, adjusting
+     * for the shift caused by removing the row from its original position first.
+     */
     @Override
     public boolean importData(TransferSupport support) {
         if (!canImport(support)) {

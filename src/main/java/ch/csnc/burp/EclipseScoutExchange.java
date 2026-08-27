@@ -81,22 +81,31 @@ public class EclipseScoutExchange {
     return StandardCharsets.UTF_8;
   }
 
+  /** Decodes {@code message}'s body using its own declared charset, per {@link #jsonCharset}. */
   private static String jsonBody(HttpMessage message) {
     return new String(message.body().getBytes(), jsonCharset(message));
   }
 
+  /** Serializes {@code jsonObj} using the charset {@code originalMessage} declared for its own body. */
   private static ByteArray jsonBody(HttpMessage originalMessage, JSONObject jsonObj) {
     return ByteArray.byteArray(jsonObj.toString().getBytes(jsonCharset(originalMessage)));
   }
 
+  /** Encodes {@code text} using the charset {@code originalMessage} declared for its own body. */
   private static ByteArray jsonBody(HttpMessage originalMessage, String text) {
     return ByteArray.byteArray(text.getBytes(jsonCharset(originalMessage)));
   }
 
+  /** Wraps a request with no response yet, e.g. one about to be sent for the first time. */
   public EclipseScoutExchange(HttpRequest request) {
     this(HttpRequestResponse.httpRequestResponse(request, null));
   }
 
+  /**
+   * Wraps a defensive copy of {@code requestResponse}'s request/response, extracting the "#"
+   * sequence number from each body's top-level JSON object, if present, into
+   * {@link #sequenceNrRequest()}/{@link #sequenceNrResponse()} for display.
+   */
   public EclipseScoutExchange(HttpRequestResponse requestResponse) {
     this.request = HttpRequest.httpRequest(requestResponse.request().httpService(),
         requestResponse.request().toByteArray());
@@ -129,6 +138,7 @@ public class EclipseScoutExchange {
     }
   }
 
+  /** This exchange's request, as most recently captured, edited, or remapped/renumbered for replay. */
   public HttpRequest request() {
     return this.request;
   }
@@ -143,10 +153,16 @@ public class EclipseScoutExchange {
     this.request = request;
   }
 
+  /** This exchange's response, or {@code null} if it hasn't been sent (or replayed) yet. */
   public HttpResponse response() {
     return this.response;
   }
 
+  /**
+   * Records {@code response} as this exchange's outcome and, if it carries a Scout "startupData"
+   * object, refreshes {@link #getUiSessionId()} from it - Scout issues a new UI session id on
+   * whichever response first establishes one, which every later request in that session must echo.
+   */
   public void setResponse(HttpResponse response) {
     this.response = response;
     if (response == null) {
@@ -163,22 +179,27 @@ public class EclipseScoutExchange {
     }
   }
 
+  /** This exchange's request and response paired together, e.g. for display in Burp's own UI. */
   public HttpRequestResponse requestResponse() {
     return HttpRequestResponse.httpRequestResponse(this.request, this.response);
   }
 
+  /** This exchange's static "#" - its fixed row identity, independent of display order or replay. */
   public Integer nr() {
     return this.nr;
   }
 
+  /** The "#" sequence number found in the request body at capture time, for display only. */
   public Integer sequenceNrRequest() {
     return this.sequenceNrRequest;
   }
 
+  /** The "#" sequence number found in the response body at capture time, for display only. */
   public Integer sequenceNrResponse() {
     return this.sequenceNrResponse;
   }
 
+  /** Assigns this exchange's static "#", tagging its request with {@link #REQUEST_HEADER} so it stays recognizable. */
   public void setNr(int nr) {
     this.nr = nr;
     this.request = this.request.withHeader(REQUEST_HEADER, String.valueOf(nr));
@@ -199,6 +220,11 @@ public class EclipseScoutExchange {
     this.request = this.request.withRemovedHeader(name);
   }
 
+  /**
+   * Propagates {@code uiSessionId} onto this exchange's request body, so it targets the UI
+   * session that was actually established during this replay run rather than whatever id was
+   * originally captured.
+   */
   public void setUiSessionId(String uiSessionId) {
     this.uiSessionId = uiSessionId;
     try {
@@ -284,6 +310,7 @@ public class EclipseScoutExchange {
     }
   }
 
+  /** Recursively walks {@code node} for "nodes" arrays, delegating each to {@link #collectNodeClassIdsFromDefinitions}. */
   private static void collectNodeClassIds(Object node, Map<String, String> result) {
     if (node instanceof JSONObject obj) {
       for (var key : obj.keySet()) {
@@ -301,6 +328,7 @@ public class EclipseScoutExchange {
     }
   }
 
+  /** Records each node definition's id-to-classId pair in {@code nodesArray}, recursing into "childNodes". */
   private static void collectNodeClassIdsFromDefinitions(JSONArray nodesArray, Map<String, String> result) {
     for (int i = 0; i < nodesArray.length(); i++) {
       var nodeObj = nodesArray.getJSONObject(i);
@@ -338,6 +366,7 @@ public class EclipseScoutExchange {
     }
   }
 
+  /** Recursively walks {@code node} for "rows" arrays, recording each row's id-to-nodeId pair. */
   private static void collectRowNodeIds(Object node, Map<String, String> result) {
     if (node instanceof JSONObject obj) {
       for (var key : obj.keySet()) {
@@ -450,6 +479,7 @@ public class EclipseScoutExchange {
     }
   }
 
+  /** Replaces every {@code $VAR:name$} occurrence in {@code text} with its current value from {@code variableValues}. */
   private static String substitutePlaceholders(String text, Map<String, String> variableValues) {
     var updated = text;
     for (var entry : variableValues.entrySet()) {
@@ -460,6 +490,7 @@ public class EclipseScoutExchange {
     return updated;
   }
 
+  /** Recursively walks {@code node}, rewriting each "target"/"nodeId"/"rowId"/"nodeIds"/"rowIds" key found. */
   private static void remapIdsRecursive(Object node, Function<String, String> targetResolver,
       Function<String, String> nodeIdResolver, Function<String, String> rowIdResolver) {
     if (node instanceof JSONObject obj) {
@@ -486,6 +517,7 @@ public class EclipseScoutExchange {
     }
   }
 
+  /** Overwrites {@code obj}'s {@code key} with {@code resolver}'s result, unless it returns {@code null}. */
   private static void applyIfResolved(JSONObject obj, String key, String originalValue,
       Function<String, String> resolver) {
     var replacement = resolver.apply(originalValue);
@@ -494,6 +526,7 @@ public class EclipseScoutExchange {
     }
   }
 
+  /** Replaces each string element of {@code arr} with {@code resolver}'s result, leaving unresolved ones untouched. */
   private static void remapArray(JSONArray arr, Function<String, String> resolver) {
     for (int i = 0; i < arr.length(); i++) {
       if (arr.get(i) instanceof String str) {
@@ -505,15 +538,18 @@ public class EclipseScoutExchange {
     }
   }
 
+  /** Fluent form of {@link #setUiSessionId}, returning this exchange for chaining. */
   public EclipseScoutExchange withUiSessionId(String uiSessionId) {
     this.setUiSessionId(uiSessionId);
     return this;
   }
 
+  /** The UI session id last observed via {@link #setResponse} or set via {@link #setUiSessionId}. */
   public String getUiSessionId() {
     return this.uiSessionId;
   }
 
+  /** Deep-copies this exchange's request/response and static "#", so a replay run can mutate its own copy freely. */
   public EclipseScoutExchange clone() {
     var clonedRequest = HttpRequest.httpRequest(this.request.httpService(), this.request.toByteArray());
     HttpResponse clonedResponse = null;

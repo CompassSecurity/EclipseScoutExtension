@@ -86,6 +86,7 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
   /** Pending sequence replays, keyed by the Burp message id of their outstanding request. */
   private Map<Integer, PendingSequence> sequences = new HashMap<>();
 
+  /** Registers this extension with Burp: builds its UI tab, and hooks into the context menu and HTTP traffic. */
   @Override
   public void initialize(MontoyaApi api) {
     EclipseScoutExtension.api = api;
@@ -109,6 +110,11 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     api.http().registerHttpHandler(this);
   }
 
+  /**
+   * Assembles the extension's suite tab: the sequence table and its actions, the variables
+   * table, and the request/response editors, wiring up their listeners, drag-and-drop, sorting
+   * and keyboard shortcuts.
+   */
   private void buildUi() {
     var statusLabel = new JLabel();
     statusLabel.setForeground(Color.DARK_GRAY);
@@ -369,14 +375,17 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
         "deleteSelectedItems", tableDeleteSelectedItems);
   }
 
+  /** This extension's suite tab component, as registered in {@link #initialize}. */
   public Component getComponent() {
     return this.panel;
   }
 
+  /** Appends {@code requestResponse} as a new row, e.g. from the "Send to Eclipse Scout" context menu action. */
   public void addRequestResponse(HttpRequestResponse requestResponse) {
     this.tableModel.addRequestResponse(requestResponse);
   }
 
+  /** All exchanges in the table's current display order, i.e. after any drag-and-drop reordering or sort. */
   private List<EclipseScoutExchange> getRequestResponesAsDisplayed() {
     var requestResponses = new ArrayList<EclipseScoutExchange>();
     for (int i = 0; i < this.table.getRowCount(); i++) {
@@ -426,6 +435,10 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     });
   }
 
+  /**
+   * Replays every displayed row in order, from the start, sending each one directly and writing
+   * its response back onto its row; stops early if {@link #cancelRequested} is set between steps.
+   */
   public void sendSequence() {
     this.commitEditorEdits();
     var requestResponses = this.getRequestResponesAsDisplayed();
@@ -459,6 +472,7 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     }
   }
 
+  /** Adds a "Send to Eclipse Scout" item that copies the selected request/response(s) into the sequence table. */
   @Override
   public List<Component> provideMenuItems(ContextMenuEvent event) {
     var sendTo = new JMenuItem("Send to %s".formatted(EclipseScoutExtension.NAME));
@@ -468,6 +482,15 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     return List.of(sendTo);
   }
 
+  /**
+   * Intercepts a request tagged with {@link EclipseScoutExchange#REQUEST_HEADER} - sent to
+   * Repeater/Intruder, or edited live and resent from there - and, before it goes out, replays
+   * every earlier row of a fresh sequence up to that row's position so its session state and ids
+   * are established, then substitutes the tagged request in as that row (applying the same
+   * uiSessionId propagation, renumbering, id remapping and variable substitution), tracking the
+   * resulting {@link PendingSequence} so {@link #handleHttpResponseReceived} can continue
+   * replaying once its response arrives.
+   */
   @Override
   public RequestToBeSentAction handleHttpRequestToBeSent(HttpRequestToBeSent requestToBeSent) {
     try {
@@ -495,6 +518,14 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     return RequestToBeSentAction.continueWith(requestToBeSent);
   }
 
+  /**
+   * Completes a {@link PendingSequence} started by {@link #handleHttpRequestToBeSent}: records
+   * the just-received response onto its target exchange, then replays the rest of the sequence
+   * to the end. If the originating request was tagged with
+   * {@link EclipseScoutExchange#RESPONSE_HEADER}, substitutes that row's own response in place of
+   * the one actually received, so Repeater/Intruder displays what that row returned rather than
+   * the response to whichever row was actually sent.
+   */
   @Override
   public ResponseReceivedAction handleHttpResponseReceived(HttpResponseReceived responseReceived) {
     var pending = this.sequences.remove(responseReceived.messageId());

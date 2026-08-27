@@ -18,6 +18,7 @@ public class EclipseScoutTableModel extends AbstractTableModel {
   private String[] columnNames = new String[] { "#", "Req#", "Res#", "Method", "Host", "Path" };
   private List<EclipseScoutExchange> exchanges = new ArrayList<>();
 
+  /** Creates an empty table model with no captured exchanges yet. */
   public EclipseScoutTableModel() {
   }
 
@@ -36,6 +37,7 @@ public class EclipseScoutTableModel extends AbstractTableModel {
     return this.columnNames[col];
   }
 
+  /** Renders the given column of the row's exchange, blanking any "#"/"Req#"/"Res#" that is unset. */
   @Override
   public Object getValueAt(int rowIndex, int columnIndex) {
     var exchange = this.exchanges.get(rowIndex);
@@ -101,14 +103,21 @@ public class EclipseScoutTableModel extends AbstractTableModel {
     }
   }
 
+  /** All rows' exchanges, in display order - the live backing list, not a copy. */
   public List<EclipseScoutExchange> getExchanges() {
     return this.exchanges;
   }
 
+  /** The exchange backing the row at model index {@code row}. */
   public EclipseScoutExchange getExchangeAt(int row) {
     return this.getExchanges().get(row);
   }
 
+  /**
+   * Replaces the row's exchange with one built from {@code requestResponse}, e.g. after editing
+   * it live in the request/response editors, while preserving the row's original static "#" so
+   * it stays addressable by {@link #setResponseForNr} and {@link EclipseScoutSequence}.
+   */
   public void setRequestResponseAt(int row, HttpRequestResponse requestResponse) {
     var nr = this.exchanges.get(row).nr();
     var exchange = new EclipseScoutExchange(requestResponse);
@@ -116,26 +125,31 @@ public class EclipseScoutTableModel extends AbstractTableModel {
     this.setExchangeAt(row, exchange);
   }
 
+  /** Overwrites the row at model index {@code row} with {@code exchange}, discarding its own static "#". */
   public void setExchangeAt(int row, EclipseScoutExchange exchange) {
     this.exchanges.set(row, exchange);
     this.fireTableRowsUpdated(row, row);
   }
 
+  /** Wraps {@code requestResponse} in a fresh exchange and appends it as a new row; see {@link #addExchange}. */
   public void addRequestResponse(HttpRequestResponse requestResponse) {
     this.addExchange(new EclipseScoutExchange(requestResponse));
   }
 
+  /** Appends {@code exchange} as a new last row, assigning it the next static "#" in sequence. */
   public void addExchange(EclipseScoutExchange exchange) {
     exchange.setNr(this.exchanges.size() + 1);
     this.exchanges.add(exchange);
     this.fireTableDataChanged();
   }
 
+  /** Deletes the row backed by {@code exchange}, if it is still present. */
   public void removeRequestResponse(EclipseScoutExchange exchange) {
     this.exchanges.remove(exchange);
     this.fireTableDataChanged();
   }
 
+  /** Replaces all rows with independent clones of {@code exchanges}, in the given order. */
   public void setExchanges(List<EclipseScoutExchange> exchanges) {
     this.exchanges = new ArrayList<>(exchanges.stream().map(EclipseScoutExchange::clone).toList());
     this.fireTableDataChanged();
