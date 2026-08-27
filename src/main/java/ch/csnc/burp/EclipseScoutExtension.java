@@ -452,11 +452,15 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
   }
 
   /**
-   * Adds an "Eclipse Scout" submenu: "New sequence" (creates a new, empty sequence and adds the
-   * selected request/response(s) to it), then one item per existing sequence (adds to that one
-   * instead) - plus, when invoked from within one of this extension's own request editor panes,
-   * that sequence's "Variables" submenu, which inserts a {@code $VAR:name$} placeholder for a
-   * declared variable at the current cursor position.
+   * Adds an "Eclipse Scout" submenu: "New sequence" (creates a new sequence, adds the selected
+   * request/response(s) to it, then orders that initial set by "Res#" - via
+   * {@link EclipseScoutTableModel#sortByColumn}, the same plain sort clicking that column header
+   * does - a reasonable default for a fresh sequence, since Burp's selection order isn't
+   * necessarily chronological), then one item per existing sequence (just appends to that one,
+   * unsorted, since its rows may already be arranged deliberately) - plus, when invoked from
+   * within one of this extension's own request editor panes, that sequence's "Variables"
+   * submenu, which inserts a {@code $VAR:name$} placeholder for a declared variable at the
+   * current cursor position.
    */
   @Override
   public List<Component> provideMenuItems(ContextMenuEvent event) {
@@ -466,6 +470,7 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     sendToMenu.add(menuItem("New sequence", () -> {
       var tab = this.createSequenceTab(this.nextDefaultSequenceName());
       event.selectedRequestResponses().forEach(tab::addRequestResponse);
+      tab.getTableModel().sortByColumn(2);
     }));
     if (!this.sequenceTabs.isEmpty()) {
       sendToMenu.addSeparator();
