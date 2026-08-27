@@ -48,6 +48,16 @@ public class EclipseScoutExchange {
   private HttpRequest request;
   private HttpResponse response;
 
+  /**
+   * The response this exchange had when it was first captured (or last re-captured via an
+   * explicit edit in the request/response editors) - unlike {@link #response}, never updated by
+   * {@link #setResponse}. {@link EclipseScoutSequence} seeds its classId-based id resolvers from
+   * this rather than {@link #response} so that writing a replay's actual response back onto a
+   * table row (see {@code EclipseScoutTableModel#setResponseForNr}) doesn't shift the baseline
+   * that later replay runs resolve ids against.
+   */
+  private HttpResponse originalResponse;
+
   private Integer nr;
   private Integer sequenceNrRequest;
   private Integer sequenceNrResponse;
@@ -112,6 +122,7 @@ public class EclipseScoutExchange {
     if (requestResponse.response() != null) {
       this.response = HttpResponse.httpResponse(requestResponse.response().toByteArray());
     }
+    this.originalResponse = this.response;
 
     if (this.request.contentType() == ContentType.JSON) {
       try {
@@ -260,11 +271,25 @@ public class EclipseScoutExchange {
    * id differs each time.
    */
   public Map<String, String> responseAdapterClassIds() {
-    if (this.response == null) {
+    return adapterClassIds(this.response);
+  }
+
+  /**
+   * Like {@link #responseAdapterClassIds()}, but computed from {@link #originalResponse} instead
+   * of {@link #response}, so it stays stable across repeated replay runs even after
+   * {@link #setResponse} has overwritten {@link #response} with a previous run's outcome. Used
+   * only by {@link EclipseScoutSequence} to seed its classId identity resolvers.
+   */
+  Map<String, String> originalResponseAdapterClassIds() {
+    return adapterClassIds(this.originalResponse);
+  }
+
+  private static Map<String, String> adapterClassIds(HttpResponse response) {
+    if (response == null) {
       return Map.of();
     }
     try {
-      var body = jsonBody(this.response).strip();
+      var body = jsonBody(response).strip();
       if (!body.startsWith("{")) {
         return Map.of();
       }
@@ -293,11 +318,23 @@ public class EclipseScoutExchange {
    * distinct from their parent Outline/Tree adapter's.
    */
   public Map<String, String> responseNodeClassIds() {
-    if (this.response == null) {
+    return nodeClassIds(this.response);
+  }
+
+  /**
+   * Like {@link #responseNodeClassIds()}, but computed from {@link #originalResponse}; see
+   * {@link #originalResponseAdapterClassIds()} for why.
+   */
+  Map<String, String> originalResponseNodeClassIds() {
+    return nodeClassIds(this.originalResponse);
+  }
+
+  private static Map<String, String> nodeClassIds(HttpResponse response) {
+    if (response == null) {
       return Map.of();
     }
     try {
-      var body = jsonBody(this.response).strip();
+      var body = jsonBody(response).strip();
       if (!body.startsWith("{")) {
         return Map.of();
       }
@@ -349,11 +386,23 @@ public class EclipseScoutExchange {
    * node it mirrors.
    */
   public Map<String, String> responseRowNodeIds() {
-    if (this.response == null) {
+    return rowNodeIds(this.response);
+  }
+
+  /**
+   * Like {@link #responseRowNodeIds()}, but computed from {@link #originalResponse}; see
+   * {@link #originalResponseAdapterClassIds()} for why.
+   */
+  Map<String, String> originalResponseRowNodeIds() {
+    return rowNodeIds(this.originalResponse);
+  }
+
+  private static Map<String, String> rowNodeIds(HttpResponse response) {
+    if (response == null) {
       return Map.of();
     }
     try {
-      var body = jsonBody(this.response).strip();
+      var body = jsonBody(response).strip();
       if (!body.startsWith("{")) {
         return Map.of();
       }
@@ -549,7 +598,14 @@ public class EclipseScoutExchange {
     return this.uiSessionId;
   }
 
-  /** Deep-copies this exchange's request/response and static "#", so a replay run can mutate its own copy freely. */
+  /**
+   * Deep-copies this exchange's request/response and static "#", so a replay run can mutate its
+   * own copy freely. {@link #originalResponse} is copied from this exchange's own
+   * {@link #originalResponse} rather than re-derived by the constructor from
+   * {@code clonedResponse} - otherwise cloning a table row whose current {@link #response} has
+   * since been overwritten with a previous replay's outcome would silently promote that outcome
+   * to be the clone's "original" baseline.
+   */
   public EclipseScoutExchange clone() {
     var clonedRequest = HttpRequest.httpRequest(this.request.httpService(), this.request.toByteArray());
     HttpResponse clonedResponse = null;
@@ -558,6 +614,8 @@ public class EclipseScoutExchange {
     }
     var cloned = new EclipseScoutExchange(HttpRequestResponse.httpRequestResponse(clonedRequest, clonedResponse));
     cloned.nr = this.nr;
+    cloned.originalResponse =
+        this.originalResponse != null ? HttpResponse.httpResponse(this.originalResponse.toByteArray()) : null;
     return cloned;
   }
 
