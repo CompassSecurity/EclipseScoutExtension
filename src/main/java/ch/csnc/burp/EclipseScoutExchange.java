@@ -470,6 +470,54 @@ public class EclipseScoutExchange {
   }
 
   /**
+   * Maps each table's target id to the ordered list of new row ids introduced in this exchange's
+   * response body via "rowsInserted" events on that table - e.g. the row created by an "Add row"
+   * action. Unlike a row that mirrors a tree node (see {@link #responseRowNodeIds()}), a row
+   * like this has neither a classId of its own nor a nodeId to resolve through - only its owning
+   * table and the order it appeared in, which is what {@link EclipseScoutSequence} matches on.
+   */
+  public Map<String, List<String>> responseInsertedRowIds() {
+    if (this.response == null) {
+      return Map.of();
+    }
+    try {
+      var body = jsonBody(this.response).strip();
+      if (!body.startsWith("{")) {
+        return Map.of();
+      }
+      var jsonObj = new JSONObject(body);
+      var result = new HashMap<String, List<String>>();
+      collectInsertedRowIds(jsonObj, result);
+      return result;
+    } catch (JSONException exc) {
+      return Map.of();
+    }
+  }
+
+  /** Recursively walks {@code node} for "rowsInserted" events, appending each one's row ids under its "target". */
+  private static void collectInsertedRowIds(Object node, Map<String, List<String>> result) {
+    if (node instanceof JSONObject obj) {
+      if ("rowsInserted".equals(obj.opt("type")) && obj.has("target") && obj.has("rows")) {
+        var rowIds = result.computeIfAbsent(obj.getString("target"), key -> new ArrayList<>());
+        var rows = obj.getJSONArray("rows");
+        for (int i = 0; i < rows.length(); i++) {
+          var rowObj = rows.getJSONObject(i);
+          if (rowObj.has("id")) {
+            rowIds.add(rowObj.getString("id"));
+          }
+        }
+      }
+      for (var key : obj.keySet()) {
+        collectInsertedRowIds(obj.get(key), result);
+      }
+    } else if (node instanceof JSONArray arr) {
+      for (int i = 0; i < arr.length(); i++) {
+        collectInsertedRowIds(arr.get(i), result);
+      }
+    }
+  }
+
+  /**
    * Rewrites "target" (adapter), "nodeId"/"nodeIds" (tree node) and "rowId"/"rowIds" (table
    * row) ids referenced in this exchange's request body, each through its own resolver -
    * returning {@code null} from a resolver leaves that particular id untouched. See
