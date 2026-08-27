@@ -229,7 +229,9 @@ public class EclipseScoutSequenceTab {
     // Flags a row yellow if either: it has neither a captured Req# nor a Res# - i.e. Scout's "#"
     // sequence number wasn't found in either its request or response body, so it can't be
     // correlated to the rest of the sequence by that number at all - or it's an empty "?poll"
-    // (no response yet, or a response reporting no events - see EclipseScoutExchange#hasOnlyResponseNr).
+    // (no response yet, or a response reporting no events, either missing its "#" entirely - {} -
+    // or containing nothing else besides it - see EclipseScoutExchange#hasEmptyResponseObject/
+    // #hasOnlyResponseNr).
     this.table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
       @Override
       public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
@@ -239,7 +241,8 @@ public class EclipseScoutSequenceTab {
           var exchange = EclipseScoutSequenceTab.this.tableModel
               .getExchangeAt(table.convertRowIndexToModel(row));
           var noReqOrResNr = exchange.sequenceNrRequest() == null && exchange.sequenceNrResponse() == null;
-          var emptyPoll = exchange.isPollRequest() && (exchange.response() == null || exchange.hasOnlyResponseNr());
+          var emptyPoll = exchange.isPollRequest() && (exchange.response() == null
+              || exchange.hasOnlyResponseNr() || exchange.hasEmptyResponseObject());
           component.setBackground(noReqOrResNr || emptyPoll ? Color.YELLOW : table.getBackground());
         }
         return component;

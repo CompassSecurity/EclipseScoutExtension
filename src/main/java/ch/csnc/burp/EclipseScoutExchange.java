@@ -254,6 +254,26 @@ public class EclipseScoutExchange {
     }
   }
 
+  /**
+   * Whether this exchange's response body is a JSON object with no keys at all - {@code {}},
+   * not an empty body - another shape of an empty {@link #isPollRequest} response, one that
+   * didn't even echo back its "#".
+   */
+  public boolean hasEmptyResponseObject() {
+    if (this.response == null) {
+      return false;
+    }
+    try {
+      var body = jsonBody(this.response).strip();
+      if (!body.startsWith("{")) {
+        return false;
+      }
+      return new JSONObject(body).keySet().isEmpty();
+    } catch (JSONException exc) {
+      return false;
+    }
+  }
+
   /** Assigns this exchange's static "#", tagging its request with {@link #REQUEST_HEADER} so it stays recognizable. */
   public void setNr(int nr) {
     this.nr = nr;
