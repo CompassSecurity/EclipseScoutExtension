@@ -37,6 +37,8 @@ import javax.swing.SwingUtilities;
 
 import burp.api.montoya.BurpExtension;
 import burp.api.montoya.MontoyaApi;
+import burp.api.montoya.core.HighlightColor;
+import burp.api.montoya.core.ToolType;
 import burp.api.montoya.http.handler.HttpHandler;
 import burp.api.montoya.http.handler.HttpRequestToBeSent;
 import burp.api.montoya.http.handler.HttpResponseReceived;
@@ -525,9 +527,24 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
    * {@link EclipseScoutExchange#RESPONSE_HEADER}, substitutes that row's own response in place of
    * the one actually received, so Repeater/Intruder displays what that row returned rather than
    * the response to whichever row was actually sent.
+   *
+   * <p>Independently of all that, every response actually seen in Proxy - not just ones this
+   * extension is replaying - is checked for Scout's "startupData" marker (see
+   * {@link EclipseScoutExchange#isStartupResponse}) and highlighted if it's there, so the request
+   * that starts a new Scout UI session stands out in Proxy history without having to go looking
+   * for it.
    */
   @Override
   public ResponseReceivedAction handleHttpResponseReceived(HttpResponseReceived responseReceived) {
+    if (responseReceived.toolSource().isFromTool(ToolType.PROXY)
+        && EclipseScoutExchange.isStartupResponse(responseReceived)) {
+      var annotations = responseReceived.annotations();
+      annotations.setHighlightColor(HighlightColor.GRAY);
+      if (!annotations.hasNotes()) {
+        annotations.setNotes("Eclipse Scout startup request");
+      }
+    }
+
     var pending = this.sequences.remove(responseReceived.messageId());
     if (pending != null) {
       pending.targetExchange().setResponse(responseReceived);

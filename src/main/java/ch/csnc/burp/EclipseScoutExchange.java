@@ -169,6 +169,22 @@ public class EclipseScoutExchange {
   }
 
   /**
+   * Whether {@code response} carries a Scout "startupData" object - present only on the response
+   * to the very first request of a new UI session (see {@link #setResponse}) - or {@code false}
+   * if it doesn't, isn't JSON, or is {@code null}.
+   */
+  public static boolean isStartupResponse(HttpResponse response) {
+    if (response == null) {
+      return false;
+    }
+    try {
+      return new JSONObject(jsonBody(response)).has("startupData");
+    } catch (JSONException exc) {
+      return false;
+    }
+  }
+
+  /**
    * Records {@code response} as this exchange's outcome and, if it carries a Scout "startupData"
    * object, refreshes {@link #getUiSessionId()} from it - Scout issues a new UI session id on
    * whichever response first establishes one, which every later request in that session must echo.
