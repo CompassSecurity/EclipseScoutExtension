@@ -228,6 +228,32 @@ public class EclipseScoutExchange {
     return this.sequenceNrResponse;
   }
 
+  /** Whether this exchange's request is one of Scout's long-polling requests, e.g. {@code /json?poll}. */
+  public boolean isPollRequest() {
+    return this.request.path().contains("?poll");
+  }
+
+  /**
+   * Whether this exchange's response body is JSON containing nothing but its "#" - e.g.
+   * {@code {"#":28}} - the shape of an empty {@link #isPollRequest} response, one that reported
+   * no events.
+   */
+  public boolean hasOnlyResponseNr() {
+    if (this.response == null) {
+      return false;
+    }
+    try {
+      var body = jsonBody(this.response).strip();
+      if (!body.startsWith("{")) {
+        return false;
+      }
+      var jsonObj = new JSONObject(body);
+      return jsonObj.keySet().size() == 1 && jsonObj.has("#");
+    } catch (JSONException exc) {
+      return false;
+    }
+  }
+
   /** Assigns this exchange's static "#", tagging its request with {@link #REQUEST_HEADER} so it stays recognizable. */
   public void setNr(int nr) {
     this.nr = nr;

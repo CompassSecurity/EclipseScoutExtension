@@ -35,6 +35,7 @@ import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
+import javax.swing.table.DefaultTableCellRenderer;
 
 import burp.api.montoya.core.Range;
 import burp.api.montoya.http.message.HttpRequestResponse;
@@ -233,6 +234,25 @@ public class EclipseScoutSequenceTab {
     this.table.getColumnModel().getColumn(3).setPreferredWidth(100);
     this.table.getColumnModel().getColumn(4).setPreferredWidth(200);
     this.table.getColumnModel().getColumn(5).setPreferredWidth(400);
+    // Flags a row yellow if either: it has neither a captured Req# nor a Res# - i.e. Scout's "#"
+    // sequence number wasn't found in either its request or response body, so it can't be
+    // correlated to the rest of the sequence by that number at all - or it's an empty "?poll"
+    // (no response yet, or a response reporting no events - see EclipseScoutExchange#hasOnlyResponseNr).
+    this.table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
+      @Override
+      public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
+          boolean hasFocus, int row, int column) {
+        var component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+        if (!isSelected) {
+          var exchange = EclipseScoutSequenceTab.this.tableModel
+              .getExchangeAt(table.convertRowIndexToModel(row));
+          var noReqOrResNr = exchange.sequenceNrRequest() == null && exchange.sequenceNrResponse() == null;
+          var emptyPoll = exchange.isPollRequest() && (exchange.response() == null || exchange.hasOnlyResponseNr());
+          component.setBackground(noReqOrResNr || emptyPoll ? Color.YELLOW : table.getBackground());
+        }
+        return component;
+      }
+    });
     this.table.getSelectionModel().addListSelectionListener(event -> {
       if (!event.getValueIsAdjusting()) {
         this.selectedRow = this.table.getSelectedRow();
