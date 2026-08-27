@@ -175,14 +175,6 @@ public class EclipseScoutSequenceTab {
         requestResponsesToDelete.add(this.tableModel.getExchangeAt(modelIndex));
       }
       requestResponsesToDelete.forEach(this.tableModel::removeRequestResponse);
-      // Cascades the deletion to any variable that targeted one of the deleted rows - otherwise
-      // it'd sit there pointing at a "#" that either matches nothing (blank preview forever) or,
-      // once EclipseScoutTableModel stopped reusing "#"s, still nothing, silently orphaned.
-      var deletedNrs = requestResponsesToDelete.stream().map(EclipseScoutExchange::nr).toList();
-      var variablesToRemove = this.variableTableModel.getVariables().stream()
-          .filter(variable -> deletedNrs.contains(variable.exchangeNr()))
-          .toList();
-      this.variableTableModel.removeVariables(variablesToRemove);
     };
 
     Runnable tableSendToRepeater = () -> {
