@@ -10,6 +10,8 @@ import java.awt.Toolkit;
 import java.awt.event.AWTEventListener;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.BufferedReader;
@@ -33,6 +35,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
+import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
 import burp.api.montoya.BurpExtension;
@@ -288,6 +291,26 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     runTable.getColumnModel().getColumn(3).setPreferredWidth(100);
     runTable.getColumnModel().getColumn(4).setPreferredWidth(200);
     runTable.getColumnModel().getColumn(5).setPreferredWidth(400);
+
+    // Strips the same headers the sequence table's own "Send to Organizer" does before handing
+    // off a copy - EclipseScoutExchange#REQUEST_HEADER/SEQUENCE_HEADER are baked into the
+    // request itself and only ever meant for this extension's own routing, not a plain
+    // reference copy.
+    Runnable runTableSendToOrganizer = () -> {
+      for (int viewIndex : runTable.getSelectedRows()) {
+        var modelIndex = runTable.convertRowIndexToModel(viewIndex);
+        var exchange = runTableModel.getExchangeAt(modelIndex);
+        var request = exchange.request().withRemovedHeader(EclipseScoutExchange.REQUEST_HEADER)
+            .withRemovedHeader(EclipseScoutExchange.SEQUENCE_HEADER);
+        EclipseScoutExtension.api.organizer()
+            .sendToOrganizer(HttpRequestResponse.httpRequestResponse(request, exchange.response()));
+      }
+    };
+    var runTableContextMenu = new JPopupMenu();
+    runTableContextMenu.add(menuItem("Send to Organizer", runTableSendToOrganizer));
+    runTable.setComponentPopupMenu(runTableContextMenu);
+    runTable.registerKeyboardAction(event -> runTableSendToOrganizer.run(),
+        KeyStroke.getKeyStroke(KeyEvent.VK_O, InputEvent.CTRL_DOWN_MASK), JComponent.WHEN_FOCUSED);
 
     var runRequestEditor = EclipseScoutExtension.api.userInterface().createHttpRequestEditor(EditorOptions.READ_ONLY);
     var runResponseEditor = EclipseScoutExtension.api.userInterface().createHttpResponseEditor(EditorOptions.READ_ONLY);
