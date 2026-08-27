@@ -41,6 +41,7 @@ import javax.swing.JSplitPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 
 import burp.api.montoya.BurpExtension;
 import burp.api.montoya.MontoyaApi;
@@ -470,18 +471,30 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
 
     event.messageEditorRequestResponse()
         .filter(editor -> editor.selectionContext() == MessageEditorHttpRequestResponse.SelectionContext.REQUEST)
-        .flatMap(this::buildVariablesMenu)
-        .ifPresent(items::add);
+        .ifPresent(editor -> this.buildVariablesMenu(event, editor).ifPresent(items::add));
 
     return items;
   }
 
   /**
+   * Whether {@code event} originated from within this extension's own request editor pane, as
+   * opposed to some other tool's (Repeater, Intruder, ...). Determined from the native input
+   * event's source component rather than {@code event}'s tool type, since any extension-provided
+   * suite tab reports {@link burp.api.montoya.core.ToolType#EXTENSIONS} regardless of which
+   * extension's UI it actually came from.
+   */
+  private boolean isOwnRequestEditor(ContextMenuEvent event) {
+    var inputEvent = event.inputEvent();
+    return inputEvent != null && inputEvent.getSource() instanceof Component source
+        && SwingUtilities.isDescendingFrom(source, this.requestEditor.uiComponent());
+  }
+
+  /**
    * Builds a "Variables" submenu listing every declared variable with a non-blank name, or
    * {@link Optional#empty()} if none are declared. Selecting an entry inserts a
-   * {@code $VAR:name$} placeholder into {@code editor}'s request at its current cursor position.
+   * {@code $VAR:name$} placeholder at the current cursor position.
    */
-  private Optional<JMenu> buildVariablesMenu(MessageEditorHttpRequestResponse editor) {
+  private Optional<JMenu> buildVariablesMenu(ContextMenuEvent event, MessageEditorHttpRequestResponse editor) {
     var names = this.variableTableModel.getVariables().stream()
         .map(EclipseScoutVariable::name)
         .filter(name -> name != null && !name.isBlank())
@@ -490,18 +503,45 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
     if (names.isEmpty()) {
       return Optional.empty();
     }
+    var ownEditor = this.isOwnRequestEditor(event);
     var menu = new JMenu("Variables");
     for (var name : names) {
       var item = new JMenuItem(name);
-      item.addActionListener(actionEvent -> this.insertVariablePlaceholder(editor, name));
+      item.addActionListener(actionEvent -> {
+        if (ownEditor) {
+          this.insertVariablePlaceholder(this.requestEditor, name);
+        } else {
+          this.insertVariablePlaceholder(editor, name);
+        }
+      });
       menu.add(item);
     }
     return Optional.of(menu);
   }
 
-  /** Inserts a {@code $VAR:name$} placeholder into {@code editor}'s request at its current cursor position. */
+  /**
+   * Inserts a {@code $VAR:name$} placeholder into {@code editor}'s request at its current cursor
+   * position. Used for every request editor except this extension's own - see
+   * {@link #insertVariablePlaceholder(HttpRequestEditor, String)} for why that one needs its own
+   * overload: {@link MessageEditorHttpRequestResponse#setRequest} doesn't write back to it.
+   */
   private void insertVariablePlaceholder(MessageEditorHttpRequestResponse editor, String name) {
     var request = editor.requestResponse().request();
+    var text = request.toString();
+    var caret = editor.caretPosition();
+    var updated = text.substring(0, caret) + "$VAR:" + name + "$" + text.substring(caret);
+    editor.setRequest(HttpRequest.httpRequest(request.httpService(), updated));
+  }
+
+  /**
+   * Inserts a {@code $VAR:name$} placeholder into {@code editor}'s request at its current cursor
+   * position, using {@link HttpRequestEditor}'s own {@code caretPosition()}/{@code setRequest()}
+   * directly rather than going through {@link MessageEditorHttpRequestResponse} - which, for this
+   * extension's own suite-tab-embedded editor (unlike Repeater's or Intruder's), doesn't actually
+   * write the update back to what's displayed.
+   */
+  private void insertVariablePlaceholder(HttpRequestEditor editor, String name) {
+    var request = editor.getRequest();
     var text = request.toString();
     var caret = editor.caretPosition();
     var updated = text.substring(0, caret) + "$VAR:" + name + "$" + text.substring(caret);
