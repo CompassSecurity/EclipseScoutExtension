@@ -36,6 +36,7 @@ import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
@@ -251,10 +252,18 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
       }
     };
 
+    var tableContextMenu = new JPopupMenu();
+    tableContextMenu.add(menuItem("Send to Repeater", tableSendToRepeater));
+    tableContextMenu.add(menuItem("Send to Intruder", tableSendToIntruder));
+    tableContextMenu.add(menuItem("Send to Organizer", tableSendToOrganizer));
+    tableContextMenu.addSeparator();
+    tableContextMenu.add(menuItem("Delete selected items", tableDeleteSelectedItems));
+
     this.table = new JTable(this.tableModel);
     this.table.setDragEnabled(true);
     this.table.setDropMode(DropMode.INSERT_ROWS);
     this.table.setTransferHandler(new EclipseScoutTableRowTransferHandler(this.table, this.tableModel));
+    this.table.setComponentPopupMenu(tableContextMenu);
     this.table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
     this.table.getColumnModel().getColumn(0).setPreferredWidth(50);
     this.table.getColumnModel().getColumn(1).setPreferredWidth(50);
@@ -439,6 +448,13 @@ public class EclipseScoutExtension implements BurpExtension, ContextMenuItemsPro
         action.run();
       }
     });
+  }
+
+  /** Builds a menu item labeled {@code label} that runs {@code action} when clicked. */
+  private JMenuItem menuItem(String label, Runnable action) {
+    var item = new JMenuItem(label);
+    item.addActionListener(event -> action.run());
+    return item;
   }
 
   /**
