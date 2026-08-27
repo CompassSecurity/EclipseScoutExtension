@@ -470,13 +470,15 @@ public class EclipseScoutExchange {
   }
 
   /**
-   * Maps each table's target id to the ordered list of new row ids introduced in this exchange's
-   * response body via "rowsInserted" events on that table - e.g. the row created by an "Add row"
-   * action. Unlike a row that mirrors a tree node (see {@link #responseRowNodeIds()}), a row
-   * like this has neither a classId of its own nor a nodeId to resolve through - only its owning
-   * table and the order it appeared in, which is what {@link EclipseScoutSequence} matches on.
+   * Maps each table's target id to the ordered list of row ids it introduced in this exchange's
+   * response body - both the rows it started with, from its own "adapterData" creation payload's
+   * "rows" array, and any added later via "rowsInserted" events (e.g. an "Add row" action) - in
+   * the order they appeared. Unlike a row that mirrors a tree node (see
+   * {@link #responseRowNodeIds()}), a row like this has neither a classId of its own nor a
+   * nodeId to resolve through - only its owning table and the order it appeared in, which is
+   * what {@link EclipseScoutSequence} matches on.
    */
-  public Map<String, List<String>> responseInsertedRowIds() {
+  public Map<String, List<String>> responseTableRowIds() {
     if (this.response == null) {
       return Map.of();
     }
@@ -487,6 +489,15 @@ public class EclipseScoutExchange {
       }
       var jsonObj = new JSONObject(body);
       var result = new HashMap<String, List<String>>();
+      if (jsonObj.has("adapterData")) {
+        var adapterData = jsonObj.getJSONObject("adapterData");
+        for (var tableId : adapterData.keySet()) {
+          var adapterObj = adapterData.getJSONObject(tableId);
+          if (adapterObj.has("rows")) {
+            collectRowIdsInto(result.computeIfAbsent(tableId, key -> new ArrayList<>()), adapterObj.getJSONArray("rows"));
+          }
+        }
+      }
       collectInsertedRowIds(jsonObj, result);
       return result;
     } catch (JSONException exc) {
@@ -498,14 +509,8 @@ public class EclipseScoutExchange {
   private static void collectInsertedRowIds(Object node, Map<String, List<String>> result) {
     if (node instanceof JSONObject obj) {
       if ("rowsInserted".equals(obj.opt("type")) && obj.has("target") && obj.has("rows")) {
-        var rowIds = result.computeIfAbsent(obj.getString("target"), key -> new ArrayList<>());
-        var rows = obj.getJSONArray("rows");
-        for (int i = 0; i < rows.length(); i++) {
-          var rowObj = rows.getJSONObject(i);
-          if (rowObj.has("id")) {
-            rowIds.add(rowObj.getString("id"));
-          }
-        }
+        collectRowIdsInto(result.computeIfAbsent(obj.getString("target"), key -> new ArrayList<>()),
+            obj.getJSONArray("rows"));
       }
       for (var key : obj.keySet()) {
         collectInsertedRowIds(obj.get(key), result);
@@ -513,6 +518,16 @@ public class EclipseScoutExchange {
     } else if (node instanceof JSONArray arr) {
       for (int i = 0; i < arr.length(); i++) {
         collectInsertedRowIds(arr.get(i), result);
+      }
+    }
+  }
+
+  /** Appends each row object's "id" in {@code rows}, in order, onto {@code rowIds}. */
+  private static void collectRowIdsInto(List<String> rowIds, JSONArray rows) {
+    for (int i = 0; i < rows.length(); i++) {
+      var rowObj = rows.getJSONObject(i);
+      if (rowObj.has("id")) {
+        rowIds.add(rowObj.getString("id"));
       }
     }
   }

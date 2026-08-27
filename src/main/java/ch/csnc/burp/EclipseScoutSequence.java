@@ -70,27 +70,29 @@ public class EclipseScoutSequence {
   }
 
   /**
-   * Resolves a row inserted into some table during the original capture (e.g. by an "Add row"
-   * action) to its replay-run counterpart, matching by the owning table's target id and
-   * insertion order - the Nth row inserted into table X originally resolves to the Nth row
-   * inserted into table X during replay. A row like this has neither a classId of its own for
-   * {@link IdentityResolver} to match on nor a nodeId to mirror (unlike a "detail table" row -
-   * see {@link #originalRowIdToNodeId}), so this is the last resort {@link #resolveRowId} falls
-   * back to.
+   * Resolves a plain table row - one that isn't mirroring a tree node, so
+   * {@link #originalRowIdToNodeId} has nothing for it - from the original capture to its
+   * replay-run counterpart, matching by the owning table's target id and the row's position
+   * among that table's rows: the Nth row of table X originally (whether it started there, from
+   * the table's own "adapterData" creation payload, or was added later via a "rowsInserted"
+   * event - see {@link EclipseScoutExchange#responseTableRowIds()}) resolves to the Nth row of
+   * table X during replay. A row like this has no classId of its own for
+   * {@link IdentityResolver} to match on either, so this is the last resort
+   * {@link #resolveRowId} falls back to.
    *
    * <p>The table itself is identified by its <em>original</em>-capture target id on both sides:
-   * {@link #learnReplay} records replay-side insertions under whatever target id the replay
-   * response actually used, and {@link #resolve} translates the original table id to that via
+   * {@link #learnReplay} records replay-side rows under whatever target id the replay response
+   * actually used, and {@link #resolve} translates the original table id to that via
    * {@code targetResolver} (the same {@link #adapterResolver} that already resolves "target"
    * ids) rather than assuming the table keeps the same id run to run.
    */
-  private static final class RowInsertionResolver {
+  private static final class TableRowResolver {
 
     private final Map<String, String> originalIdToTarget = new HashMap<>();
     private final Map<String, List<String>> originalIdsByTarget = new HashMap<>();
     private final Map<String, List<String>> replayIdsByTarget = new HashMap<>();
 
-    /** Registers row ids introduced in an originally captured response, keyed by their owning table's target id. */
+    /** Registers row ids seen in an originally captured response, keyed by their owning table's target id. */
     void learnOriginal(Map<String, List<String>> idsByTarget) {
       idsByTarget.forEach((target, ids) -> ids.forEach(id -> {
         this.originalIdToTarget.put(id, target);
@@ -98,7 +100,7 @@ public class EclipseScoutSequence {
       }));
     }
 
-    /** Registers row ids introduced in a response produced during this replay run, under their own table's target id. */
+    /** Registers row ids seen in a response produced during this replay run, under their own table's target id. */
     void learnReplay(Map<String, List<String>> idsByTarget) {
       idsByTarget.forEach((target, ids) ->
           this.replayIdsByTarget.computeIfAbsent(target, key -> new ArrayList<>()).addAll(ids));
@@ -107,9 +109,9 @@ public class EclipseScoutSequence {
     /**
      * The replay-run row id that corresponds to {@code originalRowId}, found by resolving its
      * owning table's id via {@code targetResolver} (falling back to the original table id
-     * unchanged if that resolves to nothing) and matching by insertion order within that table,
-     * or {@code null} if {@code originalRowId} is unknown or its table hasn't inserted that many
-     * rows yet on the replay side.
+     * unchanged if that resolves to nothing) and matching by position within that table, or
+     * {@code null} if {@code originalRowId} is unknown or its table hasn't shown that many rows
+     * yet on the replay side.
      */
     String resolve(String originalRowId, Function<String, String> targetResolver) {
       var originalTarget = this.originalIdToTarget.get(originalRowId);
@@ -151,7 +153,7 @@ public class EclipseScoutSequence {
 
   private final IdentityResolver adapterResolver = new IdentityResolver();
   private final IdentityResolver nodeResolver = new IdentityResolver();
-  private final RowInsertionResolver insertedRowResolver = new RowInsertionResolver();
+  private final TableRowResolver tableRowResolver = new TableRowResolver();
 
   /** A table row's original id, mapped to the id of the tree node it mirrors, if any. */
   private final Map<String, String> originalRowIdToNodeId = new HashMap<>();
@@ -167,7 +169,7 @@ public class EclipseScoutSequence {
   /**
    * Starts a fresh replay run over independent clones of {@code exchanges} (so replaying never
    * mutates the caller's own captured rows) and primes both {@link IdentityResolver}s,
-   * {@link #originalRowIdToNodeId} and {@link #insertedRowResolver} from every exchange's
+   * {@link #originalRowIdToNodeId} and {@link #tableRowResolver} from every exchange's
    * originally captured response, ahead of seeing any replay-side responses.
    */
   public EclipseScoutSequence(List<EclipseScoutExchange> exchanges, List<EclipseScoutVariable> variableDefinitions) {
@@ -177,7 +179,7 @@ public class EclipseScoutSequence {
       this.adapterResolver.learnOriginal(exchange.responseAdapterClassIds());
       this.nodeResolver.learnOriginal(exchange.responseNodeClassIds());
       this.originalRowIdToNodeId.putAll(exchange.responseRowNodeIds());
-      this.insertedRowResolver.learnOriginal(exchange.responseInsertedRowIds());
+      this.tableRowResolver.learnOriginal(exchange.responseTableRowIds());
     }
   }
 
@@ -257,7 +259,7 @@ public class EclipseScoutSequence {
       this.nodeResolver.learnReplay(previous.responseNodeClassIds());
       previous.responseRowNodeIds()
           .forEach((rowId, nodeId) -> this.replayNodeIdToRowId.putIfAbsent(nodeId, rowId));
-      this.insertedRowResolver.learnReplay(previous.responseInsertedRowIds());
+      this.tableRowResolver.learnReplay(previous.responseTableRowIds());
       this.variableValues.putAll(previous.extractVariables(this.variableDefinitions));
     }
     exchange.renumberSequenceNr(this.position);
@@ -270,15 +272,15 @@ public class EclipseScoutSequence {
   /**
    * The replay-run row id corresponding to {@code originalRowId}, tried first as a "detail
    * table" row mirroring a tree node (see {@link #resolveMirroredRowId}), then, if that finds
-   * nothing, as a row freshly inserted by some action - e.g. "Add row" - via
-   * {@link #insertedRowResolver}. {@code null} if neither strategy resolves it.
+   * nothing, as a plain table row via {@link #tableRowResolver}. {@code null} if neither
+   * strategy resolves it.
    */
   private String resolveRowId(String originalRowId) {
     var viaMirroredNode = resolveMirroredRowId(originalRowId);
     if (viaMirroredNode != null) {
       return viaMirroredNode;
     }
-    return this.insertedRowResolver.resolve(originalRowId, this.adapterResolver::resolve);
+    return this.tableRowResolver.resolve(originalRowId, this.adapterResolver::resolve);
   }
 
   /**
