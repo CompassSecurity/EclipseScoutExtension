@@ -70,60 +70,66 @@ public class EclipseScoutSequence {
   }
 
   /**
-   * Resolves a plain table row - one that isn't mirroring a tree node, so
-   * {@link #originalRowIdToNodeId} has nothing for it - from the original capture to its
-   * replay-run counterpart, matching by the owning table's target id and the row's position
-   * among that table's rows: the Nth row of table X originally (whether it started there, from
-   * the table's own "adapterData" creation payload, or was added later via a "rowsInserted"
-   * event - see {@link EclipseScoutExchange#responseTableRowIds()}) resolves to the Nth row of
-   * table X during replay. A row like this has no classId of its own for
-   * {@link IdentityResolver} to match on either, so this is the last resort
-   * {@link #resolveRowId} falls back to.
+   * Resolves an id that carries no reliable classId of its own for {@link IdentityResolver} to
+   * match on, from the original capture to its replay-run counterpart, by matching its owning
+   * parent id and its position among that parent's children: the Nth child of parent X
+   * originally resolves to the Nth child of parent X during replay. Used for two unrelated kinds
+   * of child: a plain table row - one that isn't mirroring a tree node, so
+   * {@link #originalRowIdToNodeId} has nothing for it (the Nth row of table X, whether it
+   * started there from the table's own "adapterData" creation payload or was added later via a
+   * "rowsInserted" event - see {@link EclipseScoutExchange#responseTableRowIds()}) - and a
+   * dynamically generated field of a composite widget, whose classId may not be stable across
+   * runs unlike a field instantiated from a fixed, compiled widget class (the Nth entry of an
+   * adapter's "fields" array - see {@link EclipseScoutExchange#responseAdapterFieldIds()}). For
+   * rows, this is the last resort {@link #resolveRowId} falls back to; for adapter ids in
+   * general (both "target" and "field"), it's what {@link #resolveAdapterId} falls back to once
+   * classId matching has failed - recursively, since a dynamically generated adapter's parent
+   * may itself be dynamically generated.
    *
-   * <p>The table itself is identified by its <em>original</em>-capture target id on both sides:
-   * {@link #learnReplay} records replay-side rows under whatever target id the replay response
-   * actually used, and {@link #resolve} translates the original table id to that via
-   * {@code targetResolver} (the same {@link #adapterResolver} that already resolves "target"
-   * ids) rather than assuming the table keeps the same id run to run.
+   * <p>The parent itself is identified by its <em>original</em>-capture id on both sides:
+   * {@link #learnReplay} records replay-side children under whatever parent id the replay
+   * response actually used, and {@link #resolve} translates the original parent id to that via
+   * {@code parentResolver} (the same {@link #adapterResolver} that already resolves "target"
+   * ids) rather than assuming the parent keeps the same id run to run.
    */
-  private static final class TableRowResolver {
+  private static final class PositionalIdResolver {
 
-    private final Map<String, String> originalIdToTarget = new HashMap<>();
-    private final Map<String, List<String>> originalIdsByTarget = new HashMap<>();
-    private final Map<String, List<String>> replayIdsByTarget = new HashMap<>();
+    private final Map<String, String> originalIdToParent = new HashMap<>();
+    private final Map<String, List<String>> originalIdsByParent = new HashMap<>();
+    private final Map<String, List<String>> replayIdsByParent = new HashMap<>();
 
-    /** Registers row ids seen in an originally captured response, keyed by their owning table's target id. */
-    void learnOriginal(Map<String, List<String>> idsByTarget) {
-      idsByTarget.forEach((target, ids) -> ids.forEach(id -> {
-        this.originalIdToTarget.put(id, target);
-        this.originalIdsByTarget.computeIfAbsent(target, key -> new ArrayList<>()).add(id);
+    /** Registers child ids seen in an originally captured response, keyed by their owning parent's id. */
+    void learnOriginal(Map<String, List<String>> idsByParent) {
+      idsByParent.forEach((parent, ids) -> ids.forEach(id -> {
+        this.originalIdToParent.put(id, parent);
+        this.originalIdsByParent.computeIfAbsent(parent, key -> new ArrayList<>()).add(id);
       }));
     }
 
-    /** Registers row ids seen in a response produced during this replay run, under their own table's target id. */
-    void learnReplay(Map<String, List<String>> idsByTarget) {
-      idsByTarget.forEach((target, ids) ->
-          this.replayIdsByTarget.computeIfAbsent(target, key -> new ArrayList<>()).addAll(ids));
+    /** Registers child ids seen in a response produced during this replay run, under their own parent's id. */
+    void learnReplay(Map<String, List<String>> idsByParent) {
+      idsByParent.forEach((parent, ids) ->
+          this.replayIdsByParent.computeIfAbsent(parent, key -> new ArrayList<>()).addAll(ids));
     }
 
     /**
-     * The replay-run row id that corresponds to {@code originalRowId}, found by resolving its
-     * owning table's id via {@code targetResolver} (falling back to the original table id
-     * unchanged if that resolves to nothing) and matching by position within that table, or
-     * {@code null} if {@code originalRowId} is unknown or its table hasn't shown that many rows
-     * yet on the replay side.
+     * The replay-run id that corresponds to {@code originalId}, found by resolving its owning
+     * parent's id via {@code parentResolver} (falling back to the original parent id unchanged
+     * if that resolves to nothing) and matching by position within that parent's children, or
+     * {@code null} if {@code originalId} is unknown or its parent hasn't shown that many
+     * children yet on the replay side.
      */
-    String resolve(String originalRowId, Function<String, String> targetResolver) {
-      var originalTarget = this.originalIdToTarget.get(originalRowId);
-      if (originalTarget == null) {
+    String resolve(String originalId, Function<String, String> parentResolver) {
+      var originalParent = this.originalIdToParent.get(originalId);
+      if (originalParent == null) {
         return null;
       }
-      var replayTarget = targetResolver.apply(originalTarget);
-      var replaySiblings = this.replayIdsByTarget.get(replayTarget != null ? replayTarget : originalTarget);
+      var replayParent = parentResolver.apply(originalParent);
+      var replaySiblings = this.replayIdsByParent.get(replayParent != null ? replayParent : originalParent);
       if (replaySiblings == null) {
         return null;
       }
-      var index = this.originalIdsByTarget.get(originalTarget).indexOf(originalRowId);
+      var index = this.originalIdsByParent.get(originalParent).indexOf(originalId);
       return index >= 0 && index < replaySiblings.size() ? replaySiblings.get(index) : null;
     }
   }
@@ -153,7 +159,8 @@ public class EclipseScoutSequence {
 
   private final IdentityResolver adapterResolver = new IdentityResolver();
   private final IdentityResolver nodeResolver = new IdentityResolver();
-  private final TableRowResolver tableRowResolver = new TableRowResolver();
+  private final PositionalIdResolver tableRowResolver = new PositionalIdResolver();
+  private final PositionalIdResolver fieldResolver = new PositionalIdResolver();
 
   /** A table row's original id, mapped to the id of the tree node it mirrors, if any. */
   private final Map<String, String> originalRowIdToNodeId = new HashMap<>();
@@ -169,8 +176,8 @@ public class EclipseScoutSequence {
   /**
    * Starts a fresh replay run over independent clones of {@code exchanges} (so replaying never
    * mutates the caller's own captured rows) and primes both {@link IdentityResolver}s,
-   * {@link #originalRowIdToNodeId} and {@link #tableRowResolver} from every exchange's
-   * originally captured response, ahead of seeing any replay-side responses.
+   * {@link #originalRowIdToNodeId}, {@link #tableRowResolver} and {@link #fieldResolver} from
+   * every exchange's originally captured response, ahead of seeing any replay-side responses.
    */
   public EclipseScoutSequence(List<EclipseScoutExchange> exchanges, List<EclipseScoutVariable> variableDefinitions) {
     this.exchanges = exchanges.stream().map(EclipseScoutExchange::clone).toList();
@@ -180,6 +187,7 @@ public class EclipseScoutSequence {
       this.nodeResolver.learnOriginal(exchange.responseNodeClassIds());
       this.originalRowIdToNodeId.putAll(exchange.responseRowNodeIds());
       this.tableRowResolver.learnOriginal(exchange.responseTableRowIds());
+      this.fieldResolver.learnOriginal(exchange.responseAdapterFieldIds());
     }
   }
 
@@ -221,13 +229,14 @@ public class EclipseScoutSequence {
   /**
    * Returns the next exchange in display order, propagating the UI session id from the
    * previous exchange, renumbering its body's "#" sequence number to match its position,
-   * remapping "target"/"nodeId"/"rowId" ids in its request via classId-based identity
+   * remapping "target"/"field"/"nodeId"/"rowId" ids in its request via classId-based identity
    * matching, and substituting any {@code $VAR:name$} placeholders in its request with the
    * variables' current values: an id captured against the original session is resolved to
-   * whatever id that same structural widget/node (same classId) - or, for rows, the node it
-   * mirrors - was assigned during THIS replay run. This keeps the sequence pointed at the right
-   * widget even when replay assigns different numeric ids - e.g. because an earlier step in the
-   * sequence added something that shifted every id created after it.
+   * whatever id that same structural widget/node (same classId) - or, for rows and dynamically
+   * generated fields whose classId isn't stable across runs, the position among their owning
+   * parent's children - was assigned during THIS replay run. This keeps the sequence pointed at
+   * the right widget even when replay assigns different numeric ids - e.g. because an earlier
+   * step in the sequence added something that shifted every id created after it.
    *
    * <p>Relies on the previous exchange already having been sent (its response set) before this
    * is called - true both for the plain send loop ({@code next().send()} repeated) and for
@@ -260,10 +269,11 @@ public class EclipseScoutSequence {
       previous.responseRowNodeIds()
           .forEach((rowId, nodeId) -> this.replayNodeIdToRowId.putIfAbsent(nodeId, rowId));
       this.tableRowResolver.learnReplay(previous.responseTableRowIds());
+      this.fieldResolver.learnReplay(previous.responseAdapterFieldIds());
       this.variableValues.putAll(previous.extractVariables(this.variableDefinitions));
     }
     exchange.renumberSequenceNr(this.position);
-    exchange.remapIds(this.adapterResolver::resolve, this.nodeResolver::resolve, this::resolveRowId);
+    exchange.remapIds(this::resolveAdapterId, this::resolveAdapterId, this.nodeResolver::resolve, this::resolveRowId);
     exchange.substituteVariables(this.variableValues);
     this.position++;
     return exchange;
@@ -280,7 +290,27 @@ public class EclipseScoutSequence {
     if (viaMirroredNode != null) {
       return viaMirroredNode;
     }
-    return this.tableRowResolver.resolve(originalRowId, this.adapterResolver::resolve);
+    return this.tableRowResolver.resolve(originalRowId, this::resolveAdapterId);
+  }
+
+  /**
+   * The replay-run id corresponding to {@code originalId} - an adapter id referenced via either
+   * "target" or "field" - tried first via {@link #adapterResolver} (classId-based identity,
+   * right for an adapter instantiated from a fixed, compiled widget class), then, if that finds
+   * nothing, via {@link #fieldResolver}: its owning adapter (itself resolved the same recursive
+   * way, since it may be just as dynamically generated) and its position among that adapter's
+   * "fields" - the fallback a dynamically generated adapter, whose classId isn't stable across
+   * runs, needs instead. A whole subtree of dynamically generated adapters (e.g. a custom
+   * "field per business-configured item" widget whose every descendant is generated fresh each
+   * session) resolves this way, one level of nesting at a time. {@code null} if neither strategy
+   * resolves it.
+   */
+  private String resolveAdapterId(String originalId) {
+    var viaClassId = this.adapterResolver.resolve(originalId);
+    if (viaClassId != null) {
+      return viaClassId;
+    }
+    return this.fieldResolver.resolve(originalId, this::resolveAdapterId);
   }
 
   /**

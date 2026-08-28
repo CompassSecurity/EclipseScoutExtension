@@ -534,17 +534,62 @@ public class EclipseScoutExchange {
   }
 
   /**
-   * Rewrites "target" (adapter), "nodeId"/"nodeIds" (tree node) and "rowId"/"rowIds" (table
-   * row) ids referenced in this exchange's request body, each through its own resolver -
-   * returning {@code null} from a resolver leaves that particular id untouched. See
-   * {@link EclipseScoutSequence} for how each resolver derives a replacement via
-   * classId-based identity matching against the current replay run.
+   * Maps each adapter's id to the ordered list of child field ids in its "fields" array, as
+   * introduced in this exchange's response body's "adapterData" creation payload. A field like
+   * this can be dynamically generated per business configuration rather than instantiated from
+   * a fixed, compiled widget class, so unlike most adapter ids it may carry a classId that isn't
+   * stable across runs; this lets {@link EclipseScoutSequence} fall back to resolving it by its
+   * owning adapter and position instead, the same way {@link #responseTableRowIds()} already
+   * does for table rows.
    */
-  public void remapIds(Function<String, String> targetResolver, Function<String, String> nodeIdResolver,
-      Function<String, String> rowIdResolver) {
+  public Map<String, List<String>> responseAdapterFieldIds() {
+    if (this.response == null) {
+      return Map.of();
+    }
+    try {
+      var body = jsonBody(this.response).strip();
+      if (!body.startsWith("{")) {
+        return Map.of();
+      }
+      var jsonObj = new JSONObject(body);
+      var result = new HashMap<String, List<String>>();
+      if (jsonObj.has("adapterData")) {
+        var adapterData = jsonObj.getJSONObject("adapterData");
+        for (var parentId : adapterData.keySet()) {
+          var adapterObj = adapterData.getJSONObject(parentId);
+          if (adapterObj.has("fields")) {
+            var fieldsArr = adapterObj.getJSONArray("fields");
+            var fieldIds = new ArrayList<String>();
+            for (int i = 0; i < fieldsArr.length(); i++) {
+              fieldIds.add(fieldsArr.getString(i));
+            }
+            result.put(parentId, fieldIds);
+          }
+        }
+      }
+      return result;
+    } catch (JSONException exc) {
+      return Map.of();
+    }
+  }
+
+  /**
+   * Rewrites "target"/"field" (adapter), "nodeId"/"nodeIds" (tree node) and "rowId"/"rowIds"
+   * (table row) ids referenced in this exchange's request body, each through its own resolver -
+   * returning {@code null} from a resolver leaves that particular id untouched. "target" and
+   * "field" both live in the adapter-id space and are passed separate resolvers only because
+   * they're distinct keys in the JSON; {@link EclipseScoutSequence} in fact resolves both the
+   * same way, since either can name a dynamically generated adapter (e.g. one instantiated per
+   * business-configured field rather than from a fixed, compiled widget class) whose classId
+   * isn't stable enough for plain classId matching, needing the same position-based fallback it
+   * already uses for table rows. See {@link EclipseScoutSequence} for how each resolver derives
+   * a replacement.
+   */
+  public void remapIds(Function<String, String> targetResolver, Function<String, String> fieldIdResolver,
+      Function<String, String> nodeIdResolver, Function<String, String> rowIdResolver) {
     try {
       var jsonObj = new JSONObject(jsonBody(this.request));
-      remapIdsRecursive(jsonObj, targetResolver, nodeIdResolver, rowIdResolver);
+      remapIdsRecursive(jsonObj, targetResolver, fieldIdResolver, nodeIdResolver, rowIdResolver);
       this.request = this.request.withBody(jsonBody(this.request, jsonObj));
     } catch (JSONException exc) {
       // ignore
@@ -634,14 +679,17 @@ public class EclipseScoutExchange {
     return updated;
   }
 
-  /** Recursively walks {@code node}, rewriting each "target"/"nodeId"/"rowId"/"nodeIds"/"rowIds" key found. */
+  /** Recursively walks {@code node}, rewriting each "target"/"field"/"nodeId"/"rowId"/"nodeIds"/"rowIds" key found. */
   private static void remapIdsRecursive(Object node, Function<String, String> targetResolver,
-      Function<String, String> nodeIdResolver, Function<String, String> rowIdResolver) {
+      Function<String, String> fieldIdResolver, Function<String, String> nodeIdResolver,
+      Function<String, String> rowIdResolver) {
     if (node instanceof JSONObject obj) {
       for (var key : new ArrayList<>(obj.keySet())) {
         var value = obj.get(key);
         if (key.equals("target") && value instanceof String str) {
           applyIfResolved(obj, key, str, targetResolver);
+        } else if (key.equals("field") && value instanceof String str) {
+          applyIfResolved(obj, key, str, fieldIdResolver);
         } else if (key.equals("nodeId") && value instanceof String str) {
           applyIfResolved(obj, key, str, nodeIdResolver);
         } else if (key.equals("rowId") && value instanceof String str) {
@@ -651,12 +699,12 @@ public class EclipseScoutExchange {
         } else if (key.equals("rowIds") && value instanceof JSONArray arr) {
           remapArray(arr, rowIdResolver);
         } else {
-          remapIdsRecursive(value, targetResolver, nodeIdResolver, rowIdResolver);
+          remapIdsRecursive(value, targetResolver, fieldIdResolver, nodeIdResolver, rowIdResolver);
         }
       }
     } else if (node instanceof JSONArray arr) {
       for (int i = 0; i < arr.length(); i++) {
-        remapIdsRecursive(arr.get(i), targetResolver, nodeIdResolver, rowIdResolver);
+        remapIdsRecursive(arr.get(i), targetResolver, fieldIdResolver, nodeIdResolver, rowIdResolver);
       }
     }
   }
