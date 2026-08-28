@@ -15,6 +15,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import burp.api.montoya.core.ByteArray;
+import burp.api.montoya.http.RequestOptions;
 import burp.api.montoya.http.message.ContentType;
 import burp.api.montoya.http.message.HttpMessage;
 import burp.api.montoya.http.message.HttpRequestResponse;
@@ -704,6 +705,9 @@ public class EclipseScoutExchange {
     return cloned;
   }
 
+  /** Response timeout applied to {@link #isPollRequest} requests when {@link #send}ing. */
+  static final long POLL_RESPONSE_TIMEOUT_MS = 10_000;
+
   /**
    * Sends this exchange's request directly (not via Repeater/Intruder). {@link #REQUEST_HEADER}
    * and {@link #SEQUENCE_HEADER} are stripped first: {@code api.http().sendRequest()} is
@@ -712,10 +716,17 @@ public class EclipseScoutExchange {
    * (e.g. each earlier step {@link EclipseScoutSequence} replays before reaching the row actually
    * requested) re-enter that handler's sequence-replay branch instead of just going out over the
    * wire; {@link #SEQUENCE_HEADER} is only ever meaningful alongside it, so it's stripped too.
+   *
+   * <p>{@link #isPollRequest} requests get a {@value #POLL_RESPONSE_TIMEOUT_MS}ms response
+   * timeout - the server can otherwise hold a poll open indefinitely, stalling the whole
+   * sequence run.
    */
   public void send() {
-    var response = EclipseScoutExtension.api.http()
-        .sendRequest(this.request.withRemovedHeader(REQUEST_HEADER).withRemovedHeader(SEQUENCE_HEADER))
+    var request = this.request.withRemovedHeader(REQUEST_HEADER).withRemovedHeader(SEQUENCE_HEADER);
+    var http = EclipseScoutExtension.api.http();
+    var response = (this.isPollRequest()
+            ? http.sendRequest(request, RequestOptions.requestOptions().withResponseTimeout(POLL_RESPONSE_TIMEOUT_MS))
+            : http.sendRequest(request))
         .response();
     this.setResponse(response);
   }
